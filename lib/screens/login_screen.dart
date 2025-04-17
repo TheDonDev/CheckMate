@@ -6,7 +6,8 @@ import 'package:checkmate/models/app_user.dart' as app_user;
 // Import dashboards directly (Wrapper handles the main navigation, but direct import is fine here)
 import 'package:checkmate/screens/student_dashboard.dart';
 import 'package:checkmate/screens/lecturer_dashboard.dart';
-import 'package:checkmate/widgets/custom_button.dart'; // Assuming this exists and works
+// Assuming CustomButton exists and can be styled or replaced with ElevatedButton
+// import 'package:checkmate/widgets/custom_button.dart';
 import 'package:provider/provider.dart'; // Import Provider
 
 class LoginScreen extends StatefulWidget {
@@ -25,6 +26,9 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   final _formKey = GlobalKey<FormState>();
 
+  // Define the brand color (consistent with WelcomeScreen)
+  static const Color brandColor = Color(0xFF0175C2);
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -38,7 +42,8 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.redAccent : Colors.green,
+        backgroundColor: isError ? Theme.of(context).colorScheme.error : Colors.green, // Use theme error color
+        behavior: SnackBarBehavior.floating, // Optional: makes it float above bottom nav bar if any
       ),
     );
   }
@@ -142,41 +147,54 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
+      // Use AppBar theme defined in main.dart if available
+      // Otherwise, style explicitly
       appBar: AppBar(
-        title: const Text('Login'),
-        automaticallyImplyLeading: false, // Don't show back button if pushed via Wrapper
+        title: const Text('Login to CheckMate'),
+        backgroundColor: brandColor, // Apply brand color
+        foregroundColor: Colors.white, // Ensure text/icons are white
+        automaticallyImplyLeading: false, // Don't show back button if pushed via WelcomeScreen
+        elevation: 2.0, // Subtle elevation
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Center( // Center the column vertically
-            child: SingleChildScrollView( // Allow scrolling on smaller screens
+      body: Center( // Center the content vertically
+        child: SingleChildScrollView( // Allow scrolling on smaller screens
+          child: Padding(
+            padding: const EdgeInsets.all(24.0), // Consistent padding
+            child: Form(
+              key: _formKey,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch, // Make children stretch horizontally
                 children: [
                   // Logo
                   Container(
-                    margin: const EdgeInsets.only(bottom: 30),
-                    // Make sure the path is correct and the asset is listed in pubspec.yaml
+                    margin: const EdgeInsets.only(bottom: 40), // Increased spacing below logo
                     child: Image.asset(
                       'assets/images/image.png', // Verify this path
-                      height: 150,
+                      height: 100, // Adjusted size
                       fit: BoxFit.contain,
                       errorBuilder: (context, error, stackTrace) {
                          // Show placeholder or text if image fails to load
-                         return const SizedBox(height: 150, child: Center(child: Text('CheckMate Logo', style: TextStyle(fontSize: 18, color: Colors.grey))));
+                         return const SizedBox(height: 100, child: Center(child: Text('CheckMate Logo', style: TextStyle(fontSize: 16, color: Colors.grey))));
                       },
                     ),
                   ),
                   // Email Field
                   TextFormField(
                     controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined), // Add icon
-                      // border: OutlineInputBorder(), // Provided by theme
+                    decoration: InputDecoration(
+                      labelText: 'Email Address',
+                      hintText: 'Enter your university email',
+                      prefixIcon: Icon(Icons.email_outlined, color: brandColor.withOpacity(0.7)), // Themed icon color
+                      border: OutlineInputBorder( // Consistent border style
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true, // Add subtle background fill
+                      fillColor: Colors.grey[100],
                     ),
                     keyboardType: TextInputType.emailAddress,
                     validator: (value) {
@@ -192,10 +210,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     controller: _passwordController,
                     decoration: InputDecoration(
                       labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock_outline), // Add icon
-                      // border: const OutlineInputBorder(), // Provided by theme
+                      hintText: 'Enter your password',
+                      prefixIcon: Icon(Icons.lock_outline, color: brandColor.withOpacity(0.7)), // Themed icon color
+                      border: OutlineInputBorder( // Consistent border style
+                         borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[100],
                       suffixIcon: IconButton(
-                        icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility), // Toggle icon correctly
+                        icon: Icon(
+                          _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          color: Colors.grey[600], // Subtle color for visibility icon
+                        ),
                         onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                       ),
                     ),
@@ -206,33 +232,53 @@ class _LoginScreenState extends State<LoginScreen> {
                        return null;
                     },
                   ),
-                  const SizedBox(height: 30), // Increased spacing
+                  const SizedBox(height: 35), // Increased spacing before button
                   // Login Button
                   _isLoading
-                      ? const CircularProgressIndicator()
-                      : CustomButton( // Assuming CustomButton exists
+                      ? const Center(child: CircularProgressIndicator()) // Center the indicator
+                      : ElevatedButton( // Using ElevatedButton directly for clear styling
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 52), // Full width, standard height
+                            backgroundColor: brandColor, // Use the defined brand color
+                            foregroundColor: Colors.white, // White text for contrast
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30), // Match WelcomeScreen
+                            ),
+                            elevation: 3, // Subtle elevation
+                            textStyle: textTheme.titleMedium?.copyWith( // Consistent text style
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           onPressed: _handleLogin, // Call the handler method
-                          text: 'Login',
-                          // Optional: Style the button if CustomButton doesn't handle it
-                          // style: ElevatedButton.styleFrom(minimumSize: Size(double.infinity, 50)),
+                          child: const Text('Login'),
                         ),
-                  const SizedBox(height: 20),
-                  // Register Button
-                  TextButton(
-                    onPressed: _isLoading ? null : () { // Disable while loading
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                      );
-                    },
-                    child: const Text("Don't have an account? Register here"),
+                  const SizedBox(height: 20), // Spacing after primary button
+                  // Register & Resend Buttons (Grouped)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: _isLoading ? null : () { // Disable while loading
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                          );
+                        },
+                        style: TextButton.styleFrom(foregroundColor: brandColor), // Use brand color for text
+                        child: const Text("Register here"),
+                      ),
+                       TextButton(
+                        onPressed: _isLoading ? null : _handleResendVerification, // Disable while loading
+                        style: TextButton.styleFrom(foregroundColor: colorScheme.secondary), // Use theme secondary color or brandColor
+                        child: const Text('Resend Email'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  // Resend Verification Button
+                  // Optional: Add a "Forgot Password?" button if needed
                   TextButton(
-                    onPressed: _isLoading ? null : _handleResendVerification, // Disable while loading
-                    child: const Text('Resend Verification Email'),
-                  ),
+                  onPressed: _isLoading ? null : () { /* TODO: Implement Forgot Password */ },
+                  child: const Text('Forgot Password?'),
+                ),
                 ],
               ),
             ),

@@ -1,16 +1,13 @@
 // lib/screens/lecturer_dashboard.dart
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/models/lecture.dart';
-import 'package:checkmate/screens/lecture_attendance_screen.dart'; // Ensure this screen exists and is correct
+import 'package:checkmate/screens/lecture_attendance_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
-import 'package:checkmate/services/api_service.dart'; // Use ApiService
+import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/widgets/create_lecture_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
-// import 'package:checkmate/screens/login_screen.dart'; // Not needed directly if using Wrapper
-import 'package:checkmate/screens/welcome_screen.dart'; // Import WelcomeScreen for logout
-// Intl package is implicitly used via lecture.formattedDate etc.
-// import 'package:intl/intl.dart';
+import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:provider/provider.dart';
 
 class LecturerDashboard extends StatefulWidget {
@@ -23,125 +20,112 @@ class LecturerDashboard extends StatefulWidget {
 
 class _LecturerDashboardState extends State<LecturerDashboard> {
   final ApiService apiService = ApiService();
-  // State variable to hold the Future for the list, initialized in initState
   late Future<List<Lecture>> lecturesFuture;
+
+  // Define the brand color (consistent styling)
+  static const Color brandColor = Color(0xFF0175C2);
 
   @override
   void initState() {
     super.initState();
-    // Initial load of lectures when the widget is first created
     loadLectures();
   }
 
-  // Method to fetch lectures from the API and update the Future state
-  // This triggers the FutureBuilder to rebuild
   void loadLectures() {
-    // Ensure the widget is still mounted before calling setState
     if (!mounted) return;
     setState(() {
       lecturesFuture = apiService.getLecturesForLecturer(widget.currentUser.id);
     });
   }
 
-  // Helper to show snackbar messages, checking if the widget is still mounted
   void showSnackBar(String message, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: isError ? Colors.redAccent : Colors.green,
-        duration: const Duration(seconds: 3), // Give user time to read
+        backgroundColor: isError ? Theme.of(context).colorScheme.error : Colors.green,
+        behavior: SnackBarBehavior.floating, // Consistent behavior
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(10),
       ),
     );
   }
 
-  // Shows the dialog to create a new lecture
   void showCreateLectureDialog() async {
-    // Await the result from the dialog (true if created successfully)
     final result = await showDialog<bool>(
       context: context,
-      barrierDismissible: false, // Prevent closing by tapping outside
+      barrierDismissible: false,
       builder: (BuildContext context) {
-        // Pass the current user to the dialog
         return CreateLectureDialog(currentUser: widget.currentUser);
       },
     );
-
-    // If the dialog returned true, reload the lectures list
     if (result == true && mounted) {
       loadLectures();
     }
   }
 
-  // Shows the dialog to check-in a student using their visit number
   void showCheckInDialog(Lecture lecture) {
     final visitNumberController = TextEditingController();
-    // Use a local variable for loading state within the dialog
     bool isCheckingIn = false;
 
     showDialog(
       context: context,
-      barrierDismissible: false, // Prevent accidental dismissal
-      builder: (dialogContext) { // Use a different context name for clarity
-        // Use StatefulBuilder to manage the dialog's internal state (isCheckingIn)
+      barrierDismissible: false,
+      builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text('Check-In for ${lecture.unitName}'),
-              content: TextField(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), // Rounded corners
+              title: Text('Check-In: ${lecture.unitName}'),
+              content: TextField( // Use standard TextField, styling comes from theme or InputDecoration
                 controller: visitNumberController,
-                decoration: const InputDecoration(
-                  labelText: 'Enter Student Visit Number',
+                decoration: InputDecoration( // Apply consistent decoration
+                  labelText: 'Student Visit Number',
                   hintText: 'e.g., 123456',
-                  // No need for border: OutlineInputBorder() if using global theme
+                  prefixIcon: Icon(Icons.confirmation_number_outlined, color: brandColor.withOpacity(0.7)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  filled: true,
+                  fillColor: Colors.grey[100],
                 ),
                 keyboardType: TextInputType.number,
-                autofocus: true, // Focus the field immediately
+                autofocus: true,
               ),
+              actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               actions: [
                 TextButton(
-                  // Disable cancel button while processing
                   onPressed: isCheckingIn ? null : () => Navigator.of(dialogContext).pop(),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  // Disable button while processing, show loading indicator
                   onPressed: isCheckingIn ? null : () async {
                     final visitNumber = visitNumberController.text.trim();
                     if (visitNumber.isEmpty) {
-                      // Show snackbar within the dialog's context if possible, or main context
                       showSnackBar('Please enter a visit number.', isError: true);
-                      return; // Don't proceed if empty
+                      return;
                     }
-
-                    // Update dialog state to show loading
                     setDialogState(() => isCheckingIn = true);
                     try {
-                      // Call ApiService to check in the student
                       final AttendanceRecord checkedInRecord = await apiService.checkInStudent(
-                        lecture.id,
-                        visitNumber,
-                        widget.currentUser.id, // Pass the lecturer's ID
+                        lecture.id, visitNumber, widget.currentUser.id,
                       );
-
-                      // Check if the dialog context is still valid before proceeding
                       if (!dialogContext.mounted) return;
-                      Navigator.of(dialogContext).pop(); // Close the dialog
-                      showSnackBar('Student ${checkedInRecord.studentName} checked in successfully!');
-                      // Note: Attendance screen will refresh itself when opened/refreshed
+                      Navigator.of(dialogContext).pop();
+                      showSnackBar('Student ${checkedInRecord.studentName} checked in successfully!', isError: false);
                     } catch (e) {
-                       // Check if the dialog context is still valid
                        if (!dialogContext.mounted) return;
-                       // Show specific error from ApiService (ApiException) or generic error
                        showSnackBar('Check-in failed: ${e.toString()}', isError: true);
                     } finally {
-                       // Ensure dialog context is valid before updating state
                        if (dialogContext.mounted) {
-                          setDialogState(() => isCheckingIn = false); // Hide loading
+                          setDialogState(() => isCheckingIn = false);
                        }
                     }
                   },
-                  // Show loading indicator or text based on state
+                  style: ElevatedButton.styleFrom( // Style primary action button
+                     backgroundColor: brandColor,
+                     foregroundColor: Colors.white,
+                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  ),
                   child: isCheckingIn
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Text('Check In'),
@@ -156,61 +140,53 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   @override
   void dispose() {
-    // Dispose any controllers if they were part of the state (like visitNumberController if it wasn't local to the dialog)
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Access AuthService using Provider for logout functionality
     final authService = Provider.of<AuthService>(context, listen: false);
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Lecturer Dashboard - ${widget.currentUser.name}'),
+        title: Text('Lecturer Dashboard - ${widget.currentUser.name}', style: const TextStyle(fontSize: 18)),
+        backgroundColor: brandColor, // Apply brand color
+        foregroundColor: Colors.white, // Ensure text/icons are white
+        elevation: 2.0, // Consistent elevation
         actions: [
-          // Refresh button
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh Lectures',
-            onPressed: loadLectures, // Trigger lecture reload
+            onPressed: loadLectures,
           ),
-          // Logout button
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Logout',
             onPressed: () async {
-              // Show confirmation dialog before logging out
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (context) => AlertDialog(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                   title: const Text('Confirm Logout'),
                   content: const Text('Are you sure you want to log out?'),
                   actions: [
+                    TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
                     TextButton(
-                      onPressed: () => Navigator.of(context).pop(false), // Return false on cancel
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(true), // Return true on confirm
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
                       child: const Text('Logout'),
                     ),
                   ],
                 ),
-              ) ?? false; // Handle null case (dialog dismissed)
-
-              // If confirmed, perform logout and navigate
-              if (confirm == true) {
+              ) ?? false;
+              if (confirm == true && mounted) {
                 await authService.logout();
-                // Check if the widget is still mounted before navigating
-                if (mounted) {
-                  // Navigate to WelcomeScreen and remove all previous routes
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                    (Route<dynamic> route) => false,
-                  );
-                }
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const WelcomeScreen()),
+                  (Route<dynamic> route) => false,
+                );
               }
             },
           ),
@@ -218,84 +194,87 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
       ),
       body: Column(
         children: [
-          // Button to create a new lecture
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 12.0), // Adjust padding
             child: ElevatedButton.icon(
               icon: const Icon(Icons.add_circle_outline),
               label: const Text('Create New Lecture'),
               onPressed: showCreateLectureDialog,
               style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50), // Make button wide
+                minimumSize: const Size(double.infinity, 52), // Match standard button height/width
+                backgroundColor: brandColor, // Use brand color
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), // Match standard radius
+                textStyle: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
           ),
-          const Divider(thickness: 1, height: 1), // Thinner divider
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+          const Divider(thickness: 0.5, height: 1, indent: 16, endIndent: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
             child: Text(
               "Your Created Lectures",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w500, color: brandColor), // Use brand color
               textAlign: TextAlign.center,
             ),
           ),
-          // List of lectures using FutureBuilder and RefreshIndicator
           Expanded(
             child: RefreshIndicator(
-              onRefresh: () async => loadLectures(), // Pull-to-refresh action
+              color: brandColor, // Set refresh indicator color
+              onRefresh: () async => loadLectures(),
               child: FutureBuilder<List<Lecture>>(
-                future: lecturesFuture, // Provide the future from state
+                future: lecturesFuture,
                 builder: (context, snapshot) {
-                  // --- Handle different states of the Future ---
-
-                  // 1. Loading State
                   if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
+                    return Center(child: CircularProgressIndicator(color: brandColor)); // Use brand color
                   }
-
-                  // 2. Error State
                   if (snapshot.hasError) {
                     print("Error fetching lectures Future: ${snapshot.error}");
                     return Center(
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
-                        child: Column( // Use column for better layout
+                        child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+                            Icon(Icons.error_outline, color: Colors.red.shade400, size: 48),
                             const SizedBox(height: 10),
                             Text(
                               'Error loading lectures: ${snapshot.error}',
                               textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.redAccent),
+                              style: TextStyle(color: Colors.grey.shade700),
                             ),
-                            const SizedBox(height: 10),
-                            ElevatedButton.icon( // Add a retry button
-                               icon: const Icon(Icons.refresh),
-                               label: const Text('Retry'),
+                            const SizedBox(height: 15),
+                            ElevatedButton.icon(
+                               icon: const Icon(Icons.refresh), label: const Text('Retry'),
                                onPressed: loadLectures,
+                               style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white),
                             )
                           ],
                         ),
                       )
                     );
                   }
-
-                  // 3. No Data State (Success, but empty list)
                   if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                    return LayoutBuilder( // Use LayoutBuilder to ensure RefreshIndicator works
+                    return LayoutBuilder(
                       builder: (context, constraints) {
                         return SingleChildScrollView(
                           physics: const AlwaysScrollableScrollPhysics(),
                           child: ConstrainedBox(
                             constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                            child: const Center(
+                            child: Center(
                               child: Padding(
-                                padding: EdgeInsets.all(20.0),
-                                child: Text(
-                                  'You have not created any lectures yet.\nTap "Create New Lecture" or pull down to refresh.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                                padding: const EdgeInsets.all(20.0),
+                                child: Column( // Use column for icon + text
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.event_note_outlined, size: 50, color: Colors.grey.shade400),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'You have not created any lectures yet.\nTap "Create New Lecture" or pull down to refresh.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -305,57 +284,77 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                     );
                   }
 
-                  // 4. Success State (Data Available)
+                  // --- Success State ---
                   final lectures = snapshot.data!;
-                  // Sort lectures (e.g., newest first by start time)
-                  lectures.sort((a, b) => b.startTime.compareTo(a.startTime));
+                  lectures.sort((a, b) => b.startTime.compareTo(a.startTime)); // Newest first
 
                   return ListView.builder(
-                    // Ensure physics allows scrolling for RefreshIndicator
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(bottom: 16.0, left: 8.0, right: 8.0), // Add horizontal padding
+                    padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0), // Adjusted padding
                     itemCount: lectures.length,
                     itemBuilder: (context, index) {
                       final lecture = lectures[index];
-                      // Use formatting getters from Lecture model
                       final subtitleText = '${lecture.course}\n'
                                            '${lecture.formattedDate} | ${lecture.formattedStartTime} - ${lecture.formattedEndTime}\n'
                                            'Venue: ${lecture.venue}';
 
                       return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 6), // Adjust vertical margin
-                        elevation: 2,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)), // Rounded corners for card
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Theme.of(context).primaryColorLight,
-                            child: Icon(Icons.school_outlined, size: 20, color: Theme.of(context).primaryColorDark),
-                          ),
-                          title: Text(
-                            '${lecture.unitName} (${lecture.unitCode})',
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                          ),
-                          subtitle: Text(subtitleText),
-                          isThreeLine: true, // Ensure space for three lines
-                          trailing: ElevatedButton.icon(
-                            icon: const Icon(Icons.person_add_alt_1, size: 18),
-                            label: const Text('Check-In'),
-                            onPressed: () => showCheckInDialog(lecture),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), // Smaller padding
-                              textStyle: const TextStyle(fontSize: 13), // Smaller text
-                            ),
-                          ),
+                        margin: const EdgeInsets.symmetric(vertical: 6.0),
+                        elevation: 1.5,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        child: InkWell( // Make the whole card tappable
+                          borderRadius: BorderRadius.circular(10), // Match card shape
                           onTap: () {
-                             // Navigate to the attendance screen for this lecture
                              Navigator.push(
                                context,
                                MaterialPageRoute(
-                                 // Pass the lecture object to the attendance screen
                                  builder: (context) => LectureAttendanceScreen(lecture: lecture),
                                ),
                              );
                           },
+                          child: Padding( // Add padding inside InkWell
+                            padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 16.0),
+                            child: Row( // Use Row for more control over layout
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: brandColor.withOpacity(0.1),
+                                  child: Icon(Icons.school_outlined, size: 22, color: brandColor),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${lecture.unitName} (${lecture.unitCode})',
+                                        style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        subtitleText,
+                                        style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                // Check-in button as a separate element
+                                ElevatedButton.icon(
+                                  icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+                                  label: const Text('Check-In'),
+                                  onPressed: () => showCheckInDialog(lecture),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: brandColor.withOpacity(0.15), // Lighter background for secondary action
+                                    foregroundColor: brandColor, // Brand color text
+                                    elevation: 0, // No elevation
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), // Pill shape
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     },
