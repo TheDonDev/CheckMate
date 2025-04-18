@@ -98,13 +98,18 @@ router.post('/', checkAuth, async (req, res) => {
     res.status(201).json({ id: docRef.id, ...newLectureData });
 
   } catch (error) {
-    console.error('Error creating lecture:', error);
-    // Check for specific error types if needed
-    res.status(500).json({ error: 'Internal Server Error: Failed to create lecture' });
+    // --- Improved Error Logging ---
+    console.error('Error creating lecture:', error); // Log the full error object
+    console.error('Error Stack:', error.stack); // Log the stack trace
+    res.status(500).json({
+        error: 'Internal Server Error: Failed to create lecture',
+        // Include details only in non-production environments for security
+        details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 
-// --- Get lectures for a specific lecturer --- ADDED ROUTE ---
+// --- Get lectures for a specific lecturer ---
 // Apply checkAuth middleware
 router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
     try {
@@ -116,6 +121,8 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
             console.log(`Forbidden attempt: User ${authUserId} tried to access lectures for ${requestedLecturerId}`);
             return res.status(403).json({ error: 'Forbidden: You can only access your own lectures.' });
         }
+
+        console.log(`Fetching lectures for lecturerId: ${requestedLecturerId}`); // Log incoming request
 
         const lecturesRef = db.collection('lectures'); // Use lowercase 'lectures'
         const snapshot = await lecturesRef
@@ -145,13 +152,19 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
         console.log(`Found ${lectures.length} lectures for lecturer ${requestedLecturerId}`);
         res.json(lectures);
     } catch (error) {
-        console.error(`Error getting lectures for lecturer ${req.params.lecturerId}:`, error);
-        res.status(500).json({ error: 'Internal Server Error: Failed to get lectures for lecturer' });
+        // --- Improved Error Logging ---
+        console.error(`Error getting lectures for lecturer ${req.params.lecturerId}:`, error); // Log the full error object
+        console.error('Error Stack:', error.stack); // Log the stack trace
+        res.status(500).json({
+            error: 'Internal Server Error: Failed to get lectures for lecturer',
+            // Include details only in non-production environments for security
+            details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+        });
     }
 });
 
 
-// --- Get lectures for a student (Filtered) --- CORRECTED ---
+// --- Get lectures for a student (Filtered) ---
 // Apply checkAuth middleware (if students must be logged in)
 router.get('/student', checkAuth, async (req, res) => {
   try {
@@ -164,6 +177,8 @@ router.get('/student', checkAuth, async (req, res) => {
         console.error('Validation Error: Missing required student filter parameters.');
         return res.status(400).json({ error: 'Missing required filter parameters (school, department, course, yearOfStudy, semester).' });
     }
+
+    console.log('Fetching lectures for student criteria:', req.query); // Log incoming request
 
     const lecturesRef = db.collection('lectures'); // Use lowercase 'lectures'
     let query = lecturesRef;
@@ -181,6 +196,8 @@ router.get('/student', checkAuth, async (req, res) => {
     // query = query.where('lectureDate', '>=', today);
 
     // Order results
+    // IMPORTANT: This composite query likely requires a Firestore index!
+    // Check backend logs for an error message with an index creation link if it fails.
     query = query.orderBy('lectureDate', 'asc').orderBy('startTime', 'asc');
 
     const snapshot = await query.get();
@@ -206,19 +223,44 @@ router.get('/student', checkAuth, async (req, res) => {
     console.log(`Found ${lectures.length} student lectures for filters: ${JSON.stringify(req.query)}`);
     res.json(lectures);
   } catch (error) {
-    console.error('Error getting student lectures:', error);
-    res.status(500).json({ error: 'Internal Server Error: Failed to get student lectures' });
+    // --- Improved Error Logging ---
+    console.error('Error getting student lectures:', error); // Log the full error object
+    console.error('Error Stack:', error.stack); // Log the stack trace
+
+    // Check specifically for Firestore index errors
+    if (error.code === 'failed-precondition') { // Firestore code for missing index
+        console.error("Firestore Index Missing: The query requires an index. Check the error details for a link to create it in the Firebase console.");
+        return res.status(500).json({
+            error: 'Internal Server Error: Failed to get student lectures due to missing database index.',
+            details: 'A required Firestore index is missing. Please check backend logs or Firebase console.'
+        });
+    }
+
+    res.status(500).json({
+        error: 'Internal Server Error: Failed to get student lectures',
+        // Include details only in non-production environments for security
+        details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 
-// --- Get all lectures (Keep as is, but ensure auth/admin check if needed) ---
+// --- Get all lectures (Example - Add admin check if needed) ---
 router.get('/', checkAuth, async (req, res) => {
-  // Add authorization check if only admins should see all lectures
-  // const userDoc = await db.collection('users').doc(req.userData.userId).get();
-  // const isAdmin = userDoc.exists && userDoc.data().role === 'admin';
-  // if (!isAdmin) return res.status(403).json({ error: 'Forbidden' });
+  // --- Authorization Check (Example: Only allow admins) ---
+  // try {
+  //   const userDoc = await db.collection('users').doc(req.userData.userId).get();
+  //   if (!userDoc.exists || userDoc.data().role !== 'admin') {
+  //       console.log(`Forbidden attempt: Non-admin user ${req.userData.userId} tried to access all lectures.`);
+  //       return res.status(403).json({ error: 'Forbidden: Only administrators can access all lectures.' });
+  //   }
+  // } catch (authError) {
+  //     console.error('Error checking admin role:', authError);
+  //     return res.status(500).json({ error: 'Internal Server Error during authorization check.' });
+  // }
+  // --- End Authorization Check ---
 
   try {
+    console.log('Fetching all lectures (admin/debug access)'); // Log incoming request
     const snapshot = await db.collection('lectures').orderBy('createdAt', 'desc').get(); // Use lowercase 'lectures'
     const lectures = [];
     snapshot.forEach((doc) => {
@@ -232,22 +274,33 @@ router.get('/', checkAuth, async (req, res) => {
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : null,
          });
     });
+    console.log(`Found ${lectures.length} total lectures.`);
     res.json(lectures);
   } catch (error) {
-    console.error('Error getting all lectures:', error);
-    res.status(500).json({ error: 'Internal Server Error: Failed to get all lectures' });
+    // --- Improved Error Logging ---
+    console.error('Error getting all lectures:', error); // Log the full error object
+    console.error('Error Stack:', error.stack); // Log the stack trace
+    res.status(500).json({
+        error: 'Internal Server Error: Failed to get all lectures',
+        // Include details only in non-production environments for security
+        details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 
-// --- Get lecture by ID (Keep as is) ---
+// --- Get lecture by ID ---
 router.get('/:lectureId', checkAuth, async (req, res) => {
   try {
     const lectureId = req.params.lectureId;
+    console.log(`Fetching lecture by ID: ${lectureId}`); // Log incoming request
+
     const doc = await db.collection('lectures').doc(lectureId).get(); // Use lowercase 'lectures'
     if (!doc.exists) {
+      console.log(`Lecture not found for ID: ${lectureId}`);
       res.status(404).json({ error: 'Lecture not found' });
     } else {
       const data = doc.data();
+      console.log(`Found lecture for ID: ${lectureId}`);
       res.json({
           id: doc.id,
           ...data,
@@ -258,8 +311,14 @@ router.get('/:lectureId', checkAuth, async (req, res) => {
        });
     }
   } catch (error) {
-    console.error('Error getting lecture by ID:', error);
-    res.status(500).json({ error: 'Internal Server Error: Failed to get lecture' });
+    // --- Improved Error Logging ---
+    console.error(`Error getting lecture by ID ${req.params.lectureId}:`, error); // Log the full error object
+    console.error('Error Stack:', error.stack); // Log the stack trace
+    res.status(500).json({
+        error: 'Internal Server Error: Failed to get lecture',
+        // Include details only in non-production environments for security
+        details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 

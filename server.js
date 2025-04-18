@@ -7,29 +7,36 @@ dotenv.config();
 const app = express();
 
 // --- Explicit CORS Configuration ---
-// Define allowed origins.
-// IMPORTANT: Replace 'http://localhost:XXXXX' and 'http://127.0.0.1:XXXXX'
-// with the actual origin(s) your Flutter web app runs on during development.
-// Check the browser's address bar or the 'flutter run -d chrome' output for the correct port.
-const allowedOrigins = [
-  // Add the specific origin(s) of your Flutter web development server
-  'http://localhost:63632', // Example port from your initial logs - ADJUST IF NEEDED!
-  'http://127.0.0.1:63632', // Include both localhost and 127.0.0.1 versions - ADJUST IF NEEDED!
-
-  // Add the URL of your deployed Flutter web app here for production later
-  // e.g., 'https://your-app-domain.com'
+// Define specific allowed origins (e.g., for production deployment).
+const specificAllowedOrigins = [
+  'http://localhost:65178', // Flutter app origin
+  'http://127.0.0.1:65178', // Flutter app origin
+  'http://10.0.2.2:5000',   // Android emulator accessing localhost
+  'http://localhost:50169',  // Allow Flutter app origin
+  'http://localhost:51897'   // Allow Flutter app origin
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, Postman)
-    // or requests from origins in the allowedOrigins list
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true); // Allow the request
-    } else {
-      console.error(`CORS Error: Origin ${origin} not allowed.`); // Log denied origins
-      callback(new Error('Not allowed by CORS')); // Deny the request
+    // 1. Allow requests with no origin (like mobile apps, curl requests, server-to-server)
+    if (!origin) {
+      return callback(null, true);
     }
+
+    // 2. Allow origins matching localhost or 127.0.0.1 with any port (for local development)
+    const developmentOriginRegex = /^http:\/\/(localhost|127.0.0.1):\d+$/;
+    if (developmentOriginRegex.test(origin)) {
+      return callback(null, true);
+    }
+
+    // 3. Allow specific origins from the predefined list (for production, staging, etc.)
+    if (specificAllowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // 4. If none of the above match, deny the request
+    console.error(`CORS Error: Origin ${origin} not allowed.`); // Log denied origins
+    callback(new Error('Not allowed by CORS')); // Deny the request
   },
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Specify allowed HTTP methods
   allowedHeaders: ['Content-Type', 'Authorization'], // Explicitly allow Content-Type and Authorization headers
@@ -40,17 +47,10 @@ const corsOptions = {
 app.use(cors(corsOptions));
 // --- End CORS Configuration ---
 
-
 // --- Standard Middleware ---
-// Middleware to parse incoming JSON request bodies
 app.use(express.json());
-// Middleware to parse URL-encoded request bodies (optional, if you use form submissions)
-// app.use(express.urlencoded({ extended: true }));
-// --- End Standard Middleware ---
-
 
 // --- API Route Definitions ---
-// Import route handlers from separate files
 const firebaseLectureRoutes = require('./routes/firebaseLectures');
 const firebaseAttendanceRoutes = require('./routes/firebaseAttendance');
 const firebaseUserRoutes = require('./routes/firebaseUsers');
@@ -58,42 +58,44 @@ const firebaseSchoolRoutes = require('./routes/firebaseSchools');
 const firebaseDepartmentRoutes = require('./routes/firebaseDepartments');
 const firebaseCourseRoutes = require('./routes/firebaseCourses');
 
-// Mount the imported routes onto specific base paths
 app.use('/api/firebase/lectures', firebaseLectureRoutes);
 app.use('/api/firebase/attendance', firebaseAttendanceRoutes);
 app.use('/api/firebase/users', firebaseUserRoutes);
 app.use('/api/firebase/schools', firebaseSchoolRoutes);
 app.use('/api/firebase/departments', firebaseDepartmentRoutes);
 app.use('/api/firebase/courses', firebaseCourseRoutes);
-// --- End API Route Definitions ---
 
-
-// --- Health Check Endpoint (Optional but Recommended) ---
+// --- Health Check Endpoint ---
 app.get('/health', (req, res) => {
   res.status(200).send('Server is healthy');
 });
-// --- End Health Check Endpoint ---
 
-
-// --- Global Error Handler (Optional but Recommended) ---
-// Catches errors from async route handlers if they are not caught locally
+// --- Global Error Handler ---
 app.use((err, req, res, next) => {
-  console.error("Global Error Handler Caught:", err.stack); // Log the error stack trace
-  // Avoid sending stack trace to client in production
+  if (err.message === 'Not allowed by CORS') {
+      console.error("CORS Error caught by Global Handler:", err.message);
+      return res.status(403).json({ error: 'Not allowed by CORS' }); // 403 Forbidden is appropriate
+  }
+
+  console.error("Global Error Handler Caught:", err.stack || err);
   const statusCode = err.statusCode || 500;
-  const message = process.env.NODE_ENV === 'production' ? 'An internal server error occurred' : err.message;
+  const message = (process.env.NODE_ENV === 'production' && statusCode === 500)
+                  ? 'An internal server error occurred'
+                  : err.message || 'An unexpected error occurred';
   res.status(statusCode).json({ error: message });
 });
-// --- End Global Error Handler ---
-
 
 // --- Start the Server ---
-// Define the port the server will listen on, using environment variable or default
 const PORT = process.env.PORT || 5000;
 
-// Start the Express server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Allowed CORS origins: ${allowedOrigins.join(', ')}`); // Log allowed origins on startup
+  console.log(`CORS configured to allow:`);
+  console.log(`  - Requests with no origin`);
+  console.log(`  - Any origin matching http://localhost:<port> or http://127.0.0.1:<port> (for development)`);
+  if (specificAllowedOrigins.length > 0) {
+    console.log(`  - Specific origins: ${specificAllowedOrigins.join(', ')}`);
+  } else {
+    console.log(`  - No specific origins currently listed in specificAllowedOrigins.`);
+  }
 });
-// --- End Start the Server ---

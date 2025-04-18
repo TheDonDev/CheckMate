@@ -34,7 +34,9 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   // Method to load lectures for the current lecturer
   void loadLectures() {
     if (!mounted) return;
+    print("Fetching lectures for lecturer ID: ${widget.currentUser.id}"); // Debugging statement
     setState(() {
+      // Fetch lectures using the ApiService
       // Fetch lectures using the ApiService
       lecturesFuture = apiService.getLecturesForLecturer(widget.currentUser.id);
     });
