@@ -2,9 +2,7 @@
 import 'package:checkmate/constants/dropdown_data.dart'; // Import constants
 import 'package:checkmate/screens/login_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
-// import 'package:checkmate/widgets/custom_button.dart'; // Assuming CustomButton exists or use ElevatedButton
 import 'package:flutter/material.dart';
-// Remove Provider import if not used directly here
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -18,31 +16,52 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
-  final AuthService _authService = AuthService(); // Keep AuthService for registration
+  final TextEditingController _registrationNumberController = TextEditingController(); // Added
+  final AuthService _authService = AuthService();
   String? _selectedSchool;
   String? _selectedDepartment;
   String? _selectedCourse;
-  bool _isLoading = false; // Made non-final to allow changes
+  bool _isLoading = false;
+  bool _showRegistrationNumberField = false; // Added state for conditional field
 
-  // --- Remove local dropdown data lists/maps ---
-  // final List<String> _schools = [ ... ];
-  // final Map<String, List<String>> _departments = { ... };
-  // final Map<String, List<String>> _courses = { ... };
-
-  bool _obscurePassword = true; // Made non-final
-  bool _obscureConfirmPassword = true; // Made non-final
-  final _formKey = GlobalKey<FormState>(); // Renamed from formKey for consistency
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+  final _formKey = GlobalKey<FormState>();
 
   // Define the brand color (consistent with WelcomeScreen & LoginScreen)
   static const Color brandColor = Color(0xFF0175C2);
 
   @override
+  void initState() {
+    super.initState();
+    // Add listener to email controller to check domain
+    _emailController.addListener(_checkEmailDomain);
+  }
+
+  @override
   void dispose() {
+    _emailController.removeListener(_checkEmailDomain); // Remove listener
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _registrationNumberController.dispose(); // Dispose controller
     super.dispose();
+  }
+
+  // Check email domain to show/hide registration number field
+  void _checkEmailDomain() {
+    final email = _emailController.text.trim().toLowerCase();
+    // Ensure the domain check is accurate for your specific student emails
+    final bool isStudentEmail = email.endsWith('@student.au.ac.ke');
+    if (_showRegistrationNumberField != isStudentEmail) {
+      setState(() {
+        _showRegistrationNumberField = isStudentEmail;
+        if (!isStudentEmail) {
+          _registrationNumberController.clear(); // Clear field if hidden
+        }
+      });
+    }
   }
 
   // Helper to show snackbar messages
@@ -53,11 +72,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
         content: Text(message),
         backgroundColor: isError ? Theme.of(context).colorScheme.error : Colors.green,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(10),
       ),
     );
   }
 
-  // Registration Action
+  // Registration Action - Updated to include registrationNumber
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) {
       return; // Don't proceed if form is invalid
@@ -66,8 +87,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
     setState(() { _isLoading = true; });
 
+    // Get registration number only if the field is visible (i.e., student email)
+    final registrationNumber = _showRegistrationNumberField
+        ? _registrationNumberController.text.trim()
+        : null;
+
     try {
-      // AuthService handles user creation and setting Firestore data
+      // Call AuthService signUp with all fields, including registrationNumber
       await _authService.signUp(
         _nameController.text.trim(),
         _emailController.text.trim(),
@@ -75,6 +101,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _selectedSchool,
         _selectedDepartment,
         _selectedCourse,
+        registrationNumber, // Pass registration number (can be null)
       );
       if (!mounted) return;
       _showSuccessDialog(); // Show success message
@@ -100,7 +127,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Common InputDecoration for TextFormFields and Dropdowns
+    // Common InputDecoration for TextFormFields and Dropdowns - Refined Styling
     InputDecoration inputDecoration(String label, {String? hint, Widget? prefixIcon, Widget? suffixIcon}) {
       return InputDecoration(
         labelText: label,
@@ -109,10 +136,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
         suffixIcon: suffixIcon,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade400),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade400),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: brandColor, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.error, width: 1.0),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: colorScheme.error, width: 1.5),
         ),
         filled: true,
-        fillColor: Colors.grey[100],
-        contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0), // Adjust padding if needed
+        fillColor: Colors.grey[50], // Slightly off-white background
+        contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
       );
     }
 
@@ -122,10 +166,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         backgroundColor: brandColor, // Apply brand color
         foregroundColor: Colors.white, // Ensure text/icons are white
         elevation: 2.0,
-        // Back button is automatically implied and should be present
+        // Back button is automatically implied
       ),
       body: Padding(
-        padding: const EdgeInsets.all(24.0), // Consistent padding
+        padding: const EdgeInsets.all(20.0), // Adjusted padding
         child: Form(
           key: _formKey, // Use _formKey
           child: SingleChildScrollView(
@@ -143,13 +187,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   validator: (value) => (value == null || value.isEmpty) ? 'Please enter your name' : null,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18), // Consistent spacing
                 // Email Field
                 TextFormField(
                   controller: _emailController,
                   decoration: inputDecoration(
                     'Email Address',
-                    hint: 'Enter your university email',
+                    hint: 'Enter university email (@student.au.ac.ke or @au.ac.ke)', // More specific hint
                     prefixIcon: Icon(Icons.email_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   keyboardType: TextInputType.emailAddress,
@@ -157,10 +201,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     if (value == null || value.isEmpty) return 'Please enter your email';
                     // Basic email format check
                     if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(value)) return 'Please enter a valid email';
+                    // Optional: More specific domain validation if needed
+                    // if (!value.toLowerCase().endsWith('.au.ac.ke')) return 'Please use your university email';
                     return null;
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
+
+                // --- Conditionally Display Registration Number Field ---
+                if (_showRegistrationNumberField) ...[
+                  TextFormField(
+                    controller: _registrationNumberController,
+                    decoration: inputDecoration(
+                      'Registration Number',
+                      hint: 'Enter your student registration number',
+                      prefixIcon: Icon(Icons.badge_outlined, color: brandColor.withOpacity(0.7)),
+                    ),
+                    validator: (value) {
+                      // Required only if the field is shown
+                      if (_showRegistrationNumberField && (value == null || value.isEmpty)) {
+                        return 'Please enter your registration number';
+                      }
+                      // Add specific format validation if needed (e.g., length, pattern)
+                      // Example: Check for a specific pattern like ABC/123/XYZ
+                      // if (_showRegistrationNumberField && value != null && !RegExp(r'^[A-Z]{3}/\d{3}/[A-Z]{3}$').hasMatch(value.toUpperCase())) {
+                      //   return 'Invalid format (e.g., ABC/123/XYZ)';
+                      // }
+                      return null;
+                    },
+                    // Optional: Improve keyboard type or capitalization based on expected format
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                  const SizedBox(height: 18),
+                ],
+                // --- End Conditional Field ---
+
                 // Password Field
                 TextFormField(
                   controller: _passwordController,
@@ -176,15 +251,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                     ),
                   ),
-                  obscureText: _obscurePassword, // Use _obscurePassword state variable
+                  obscureText: _obscurePassword,
                   validator: (value) {
                     if (value == null || value.isEmpty) return 'Please enter your password';
                     if (value.length < 8) return 'Password must be at least 8 characters';
-                    // Add other password complexity rules if desired
                     return null;
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 // Confirm Password Field
                 TextFormField(
                   controller: _confirmPasswordController,
@@ -200,24 +274,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                     ),
                   ),
-                  obscureText: _obscureConfirmPassword, // Use _obscureConfirmPassword state variable
+                  obscureText: _obscureConfirmPassword,
                   validator: (value) {
                     if (value == null || value.isEmpty) return 'Please confirm your password';
                     if (value != _passwordController.text) return 'Passwords do not match';
                     return null;
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
                 // --- Use Constant Lists/Maps for Dropdowns with consistent styling ---
                 DropdownButtonFormField<String>(
-                  // Apply the consistent decoration
                   decoration: inputDecoration(
                     'School',
                     prefixIcon: Icon(Icons.school_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   value: _selectedSchool,
-                  // Use constant list from dropdown_data.dart
                   items: schoolsList.map((String school) {
                     return DropdownMenuItem<String>(value: school, child: Text(school, overflow: TextOverflow.ellipsis));
                   }).toList(),
@@ -231,7 +303,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   validator: (value) => value == null ? 'School is required' : null,
                   isExpanded: true, // Ensure dropdown takes full width
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 // Department Dropdown
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
@@ -240,7 +312,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     prefixIcon: Icon(Icons.business_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   value: _selectedDepartment,
-                  // Use constant map directly based on current _selectedSchool
                   items: (_selectedSchool != null && departmentsMap.containsKey(_selectedSchool))
                       ? departmentsMap[_selectedSchool]!.map((String department) {
                           return DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis));
@@ -256,7 +327,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   isExpanded: true,
                   disabledHint: const Text('Select school first'), // Show hint when disabled
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 // Course Dropdown
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
@@ -265,7 +336,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                      prefixIcon: Icon(Icons.book_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   value: _selectedCourse,
-                  // Use constant map directly based on current _selectedSchool
                   items: (_selectedSchool != null && coursesMap.containsKey(_selectedSchool))
                       ? coursesMap[_selectedSchool]!.map((String course) {
                           return DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis));
@@ -280,11 +350,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   isExpanded: true,
                   disabledHint: const Text('Select school first'), // Show hint when disabled
                 ),
-                const SizedBox(height: 35), // Spacing before button
+                const SizedBox(height: 30), // Spacing before button
+
                 // Register Button
                 _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : ElevatedButton( // Using ElevatedButton for consistency
+                    ? Center(child: CircularProgressIndicator(color: brandColor)) // Use brand color
+                    : ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           minimumSize: const Size(double.infinity, 52), // Full width
                           backgroundColor: brandColor, // Brand color
@@ -301,6 +372,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: const Text('Register'),
                       ),
                 const SizedBox(height: 15), // Spacing after button
+
                 // Login Link
                 TextButton(
                   onPressed: _isLoading ? null : () { // Disable while loading
@@ -322,7 +394,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // Show success dialog after registration
-  void _showSuccessDialog() { // Renamed for clarity
+  void _showSuccessDialog() {
     if (!mounted) return;
     showDialog(
       context: context,

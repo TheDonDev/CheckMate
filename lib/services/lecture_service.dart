@@ -72,13 +72,12 @@ class Lecture {
     required this.createdAt,
   });
 
-  // --- Formatting Getters (Keep as they are useful for UI) ---
+  // --- Formatting Getters ---
   String get formattedDate => DateFormat.yMMMEd().format(lectureDate);
   String get formattedStartTime => DateFormat.jm().format(startTime.toDate());
   String get formattedEndTime => DateFormat.jm().format(endTime.toDate());
 
   // --- Firestore Conversion ---
-  // *** RENAMED from toJson to toFirestore ***
   Map<String, dynamic> toFirestore() {
     return {
       'lecturerId': lecturerId,
@@ -93,8 +92,8 @@ class Lecture {
       'unitCode': unitCode,
       // Store DateTime as Timestamp for Firestore
       'lectureDate': Timestamp.fromDate(lectureDate),
-      'startTime': startTime, // Already a Timestamp
-      'endTime': endTime,     // Already a Timestamp
+      'startTime': startTime, 
+      'endTime': endTime,    
       'venue': venue,
       // Store DateTime as Timestamp for Firestore
       'createdAt': Timestamp.fromDate(createdAt),
@@ -103,13 +102,12 @@ class Lecture {
     };
   }
 
-  // *** RENAMED from fromJson to fromFirestore ***
   factory Lecture.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {}; // Handle null data
 
     // Helper to safely convert Firestore Timestamp to DateTime, providing a default
     DateTime timestampToDateTime(Timestamp? timestamp) {
-      // Return a default date (like epoch or a specific fallback) if timestamp is null
+
       return timestamp?.toDate() ?? DateTime(1970);
     }
 
@@ -136,7 +134,7 @@ class Lecture {
     );
   }
 
-  // --- API Conversion Methods (Keep as is) ---
+  // --- API Conversion Methods  ---
   factory Lecture.fromApiJson(Map<String, dynamic> json) {
     // Adapt this based on the actual structure returned by your API
     return Lecture(

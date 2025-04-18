@@ -24,24 +24,34 @@ class AuthService extends ChangeNotifier {
   Future<app_user.User?> _userFromFirebaseUser(fb_auth.User? firebaseUser) async {
     if (firebaseUser == null) {
       _currentUser = null; // Clear cache on null user
+      notifyListeners(); // Notify listeners about the change
       return null;
     }
     try {
       DocumentSnapshot userDoc = await _firestore.collection('users').doc(firebaseUser.uid).get();
       if (userDoc.exists) {
         final user = app_user.User.fromFirestore(userDoc);
-        _currentUser = user; // Update cache
+        if (_currentUser != user) { // Only update and notify if different
+           _currentUser = user; // Update cache
+           notifyListeners(); // Notify listeners about the change
+        }
         return user;
       } else {
         print("Warning: User document not found in Firestore for UID: ${firebaseUser.uid}");
         // If Firestore data is critical for app function, maybe log out here?
         // await logout(); // Example: Force logout if data is missing
-        _currentUser = null; // Clear cache if data missing
-        return null; // Or throw an exception indicating data inconsistency
+        if (_currentUser != null) { // Only update and notify if different
+           _currentUser = null; // Clears cache if data missing
+           notifyListeners(); // Notify listeners about the change
+        }
+        return null; // Or throws an exception indicating data inconsistency
       }
     } catch (e) {
       print("Error fetching user data from Firestore: $e");
-      _currentUser = null; // Clear cache on error
+      if (_currentUser != null) { // Only update and notify if different
+         _currentUser = null; // Clear cache on error
+         notifyListeners(); // Notify listeners about the change
+      }
       return null; // Or rethrow a specific error
     }
   }
@@ -49,14 +59,13 @@ class AuthService extends ChangeNotifier {
   // Stream of custom User objects
   Stream<app_user.User?> get user {
     return _firebaseAuth.authStateChanges().asyncMap((fbUser) async {
+      // Fetch user data which also updates the cache and notifies listeners via _userFromFirebaseUser
       final appUser = await _userFromFirebaseUser(fbUser);
-      // No need to notifyListeners here, StreamBuilder handles updates
       return appUser;
     });
-    // Alternative: Use map and switchMap if _userFromFirebaseUser returned a Stream
   }
 
-  // Sign Up
+  // --- Modified Sign Up Method ---
   Future<void> signUp(
     String name,
     String email,
@@ -64,6 +73,7 @@ class AuthService extends ChangeNotifier {
     String? school, // Nullable as per User model
     String? department, // Nullable
     String? course, // Nullable
+    String? registrationNumber, // Added optional registration number
   ) async {
     try {
       // Create user with email/password
@@ -75,16 +85,17 @@ class AuthService extends ChangeNotifier {
 
       if (firebaseUser != null) {
         // Send verification email
-        await firebaseUser.sendEmailVerification();
+        if (!firebaseUser.emailVerified) { // Check if already verified (unlikely on create)
+           await firebaseUser.sendEmailVerification();
+           print("Verification email sent to $email");
+        }
 
-        // *** IMPORTANT: Role assignment logic needs careful consideration ***
-        // This basic example assumes 'lecturer' keyword in email.
-        // A more robust system (e.g., admin panel, specific domain) is recommended for production.
-        String role = email.toLowerCase().contains('lecturer') ? 'lecturer' : 'student';
+        // Determine role based on email domain (adjust domain if needed)
+        final role = email.toLowerCase().endsWith('@student.au.ac.ke') ? 'student' : 'lecturer';
 
-        // Create user document in Firestore
-        await _firestore.collection('users').doc(firebaseUser.uid).set({
-          'uid': firebaseUser.uid,
+        // Prepare user data for Firestore
+        Map<String, dynamic> userData = {
+          // 'uid': firebaseUser.uid, // Not typically stored inside the doc when doc ID is the UID
           'name': name,
           'email': email,
           'role': role,
@@ -93,16 +104,24 @@ class AuthService extends ChangeNotifier {
           'course': course, // Store potentially null value
           'createdAt': FieldValue.serverTimestamp(), // Use server timestamp
           // Add 'updatedAt': FieldValue.serverTimestamp() if needed
-          // Add 'emailVerified': false // Explicitly set if needed, though Firebase handles it
-        });
+        };
+
+        // Conditionally add registrationNumber if user is a student and number is provided
+        if (role == 'student' && registrationNumber != null && registrationNumber.isNotEmpty) {
+          userData['registrationNumber'] = registrationNumber;
+        }
+
+        // Create user document in Firestore using UID as document ID
+        await _firestore.collection('users').doc(firebaseUser.uid).set(userData);
+
         // Note: _userFromFirebaseUser will fetch this data upon next auth state change
-        // No need to manually set _currentUser here.
+        // No need to manually set _currentUser here. The stream will update.
       }
     } on fb_auth.FirebaseAuthException catch (e) {
       // Handle specific Firebase Auth errors during signup
       print("FirebaseAuthException during signup: ${e.code} - ${e.message}");
       String message = 'An error occurred during registration.';
-      if (e.code == 'weak-password') { message = 'The password provided is too weak (min 6 characters).'; }
+      if (e.code == 'weak-password') { message = 'The password provided is too weak (min 8 characters).'; }
       else if (e.code == 'email-already-in-use') { message = 'An account already exists for that email.'; }
       else if (e.code == 'invalid-email') { message = 'The email address is not valid.'; }
       throw AuthException(message);
@@ -114,7 +133,7 @@ class AuthService extends ChangeNotifier {
   }
 
 
-  // --- NEW login Method ---
+  // --- Login Method ---
   /// Signs in with email/password, checks email verification (optional),
   /// and returns the custom app_user.User object.
   Future<app_user.User?> login(String email, String password, {bool skipEmailVerification = false}) async {
@@ -146,6 +165,7 @@ class AuthService extends ChangeNotifier {
       }
 
       // 4. Fetch the corresponding custom user data from Firestore using the refreshed user
+      // This call will also update _currentUser and notify listeners if successful
       final appUser = await _userFromFirebaseUser(freshFbUser);
 
       // 5. Check if custom user data was found
@@ -159,10 +179,7 @@ class AuthService extends ChangeNotifier {
 
       // 6. Return the custom user object
       print("Login successful for ${appUser.email}, Role: ${appUser.role}");
-      // Notify listeners about the successful login and potential user data update
-      // The stream already notifies, but an explicit notify might be useful
-      // if other parts of the app listen directly to AuthService state.
-      notifyListeners();
+      // No need for extra notifyListeners() here, _userFromFirebaseUser handles it.
       return appUser;
 
     } on fb_auth.FirebaseAuthException catch (e) {
@@ -172,44 +189,26 @@ class AuthService extends ChangeNotifier {
       // Combine checks for common invalid credential errors
       if (['user-not-found', 'wrong-password', 'invalid-credential', 'invalid-email'].contains(e.code)) {
          message = 'Invalid email or password.';
-      // } else if (e.code == 'invalid-email') { // Covered above
-      //    message = 'The email address format is not valid.';
       } else if (e.code == 'user-disabled') {
          message = 'This user account has been disabled.';
       } else if (e.code == 'too-many-requests') {
          message = 'Too many login attempts. Please try again later.';
       }
-      throw AuthException(message); // Throw custom exception
+      throw AuthException(message); // Throws custom exception
     } catch (e) {
       // Handle other unexpected errors
       print("Error during login: $e");
-      // Clear cache just in case
-      _currentUser = null;
-      notifyListeners();
+      // Clear cache just in case and notify
+      if (_currentUser != null) {
+         _currentUser = null;
+         notifyListeners();
+      }
       throw AuthException('An unexpected error occurred. Please try again.');
     }
   }
 
-  // --- Deprecated signIn Method (Optional: Keep for compatibility or remove) ---
-  // Keep the old signIn if other parts of the app might still use it,
-  // otherwise, remove it to avoid confusion. It doesn't handle email verification
-  // or return the user object like the new `login` method.
-  /*
-  Future<void> signIn(String email, String password) async {
-    try {
-      await _firebaseAuth.signInWithEmailAndPassword(email: email, password: password);
-      // Does not check verification or fetch user data automatically
-      // Relies on the authStateChanges stream
-    } on fb_auth.FirebaseAuthException catch (e) {
-      // ... old error handling ...
-      throw AuthException('...');
-    } catch (e) {
-      throw AuthException('...');
-    }
-  }
-  */
 
-  // --- NEW resendVerificationEmail Method ---
+  // --- Resend Verification Email Method ---
   Future<void> resendVerificationEmail() async {
     // Try to get current user, might be null if called before login attempt
     final fbUser = _firebaseAuth.currentUser;
@@ -247,13 +246,33 @@ class AuthService extends ChangeNotifier {
     }
   }
 
+  // --- Password Reset Method ---
+  Future<void> sendPasswordResetEmail(String email) async {
+    try {
+      await _firebaseAuth.sendPasswordResetEmail(email: email);
+      print("Password reset email sent to $email");
+    } on fb_auth.FirebaseAuthException catch (e) {
+      print("FirebaseAuthException during password reset: ${e.code} - ${e.message}");
+      String message = 'Could not send password reset email.';
+      if (e.code == 'user-not-found' || e.code == 'invalid-email') {
+        message = 'No user found for that email address.';
+      } else if (e.code == 'missing-email') {
+         message = 'Please enter your email address.';
+      }
+      throw AuthException(message);
+    } catch (e) {
+      print("Unexpected error sending password reset: $e");
+      throw AuthException('An unexpected error occurred. Please try again.');
+    }
+  }
 
-  // Sign Out
+
+  // --- Sign Out Method ---
   Future<void> logout() async {
     try {
       await _firebaseAuth.signOut();
-      _currentUser = null; // Clear cache
-      notifyListeners(); // Notify listeners about logout
+      // _userFromFirebaseUser(null) will be called by the stream,
+      // which clears the cache and notifies listeners.
       print("User logged out successfully.");
     } catch (e) {
       print("Error during sign out: $e");
@@ -270,10 +289,21 @@ class AuthService extends ChangeNotifier {
      print("Manual user refresh triggered.");
      final fbUser = _firebaseAuth.currentUser;
      if (fbUser != null) {
-       await fbUser.reload(); // Reload Firebase user data
+       try {
+          await fbUser.reload(); // Reload Firebase user data
+       } catch (e) {
+          print("Error reloading Firebase user: $e");
+          // Decide how to handle reload error, maybe logout?
+          if (e is fb_auth.FirebaseAuthException && e.code == 'user-token-expired') {
+             await logout();
+             throw AuthException('Session expired. Please log in again.');
+          }
+          // Otherwise, might proceed with potentially stale data or throw
+       }
      }
-     final appUser = await _userFromFirebaseUser(_firebaseAuth.currentUser); // Fetch Firestore data again
-     notifyListeners(); // Notify listeners of potential change
+     // Fetch Firestore data again using the potentially reloaded user
+     // This call updates cache and notifies listeners via _userFromFirebaseUser
+     final appUser = await _userFromFirebaseUser(_firebaseAuth.currentUser);
      return appUser;
   }
 }

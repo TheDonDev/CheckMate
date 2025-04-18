@@ -37,7 +37,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     print("Fetching lectures for lecturer ID: ${widget.currentUser.id}"); // Debugging statement
     setState(() {
       // Fetch lectures using the ApiService
-      // Fetch lectures using the ApiService
       lecturesFuture = apiService.getLecturesForLecturer(widget.currentUser.id);
     });
   }
@@ -74,59 +73,74 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     }
   }
 
-  // Method to show the dialog for checking in a student manually
+  // --- Modified: Check-In Dialog uses Registration Number ---
   void showCheckInDialog(Lecture lecture) {
-    final visitNumberController = TextEditingController();
+    final registrationNumberController = TextEditingController(); // Changed controller name
     bool isCheckingIn = false;
 
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: false, // Don't dismiss easily during operation
       builder: (dialogContext) {
-        return StatefulBuilder( // Use StatefulBuilder to update dialog state
+        return StatefulBuilder( // Use StatefulBuilder to update dialog state (for loading indicator)
           builder: (context, setDialogState) {
             return AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), // Rounded corners
               title: Text('Check-In: ${lecture.unitName}'),
               content: TextField(
-                controller: visitNumberController,
+                controller: registrationNumberController, // Use new controller
                 decoration: InputDecoration( // Apply consistent decoration
-                  labelText: 'Student Visit Number',
-                  hintText: 'e.g., 123456',
-                  prefixIcon: Icon(Icons.confirmation_number_outlined, color: brandColor.withOpacity(0.7)),
+                  labelText: 'Student Registration Number', // Updated label
+                  hintText: 'e.g., SCT211-00XX/YYYY', // Updated hint
+                  prefixIcon: Icon(Icons.badge_outlined, color: brandColor.withOpacity(0.7)), // Updated icon
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  enabledBorder: OutlineInputBorder(
+                     borderRadius: BorderRadius.circular(12),
+                     borderSide: BorderSide(color: Colors.grey.shade400),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                     borderRadius: BorderRadius.circular(12),
+                     borderSide: BorderSide(color: brandColor, width: 1.5),
+                  ),
                   filled: true,
-                  fillColor: Colors.grey[100],
+                  fillColor: Colors.grey[50],
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: TextInputType.text, // Allow text and symbols
+                textCapitalization: TextCapitalization.characters, // Suggest uppercase
                 autofocus: true,
               ),
               actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               actions: [
                 TextButton(
+                  // Disable cancel button while checking in
                   onPressed: isCheckingIn ? null : () => Navigator.of(dialogContext).pop(),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
+                  // Disable button while checking in
                   onPressed: isCheckingIn ? null : () async {
-                    final visitNumber = visitNumberController.text.trim();
-                    if (visitNumber.isEmpty) {
-                      // Show error locally within the dialog context if possible, or use dashboard's snackbar
-                      // For simplicity, using dashboard's snackbar after potential pop
-                      showSnackBar('Please enter a visit number.', isError: true);
-                      return;
+                    final registrationNumber = registrationNumberController.text.trim().toUpperCase(); // Get reg number, trim, maybe uppercase
+                    if (registrationNumber.isEmpty) {
+                      // Show error using the main scaffold's snackbar
+                      showSnackBar('Please enter a registration number.', isError: true);
+                      return; // Keep dialog open
                     }
-                    setDialogState(() => isCheckingIn = true);
+                    setDialogState(() => isCheckingIn = true); // Show loading indicator
                     try {
-                      // Call API to check in the student
+                      // Call API with registration number
                       final AttendanceRecord checkedInRecord = await apiService.checkInStudent(
-                        lecture.id, visitNumber, widget.currentUser.id,
+                        lecture.id,
+                        registrationNumber, // Pass registration number
+                        widget.currentUser.id, // Pass lecturer ID
                       );
-                      if (!dialogContext.mounted) return; // Check mount status after async gap
+                      // Check if dialog context is still mounted before interacting with it
+                      if (!dialogContext.mounted) return;
                       Navigator.of(dialogContext).pop(); // Close dialog on success
-                      showSnackBar('Student ${checkedInRecord.studentName} checked in successfully!', isError: false);
+                      // Updated success message including student name and reg number
+                      showSnackBar('Student ${checkedInRecord.studentName} (${checkedInRecord.registrationNumber}) checked in successfully!', isError: false);
                     } catch (e) {
-                       if (!dialogContext.mounted) return; // Check mount status after async gap
+                       // Check if dialog context is still mounted before showing snackbar
+                       if (!dialogContext.mounted) return;
                        // Don't pop the dialog on error, show error message
                        showSnackBar('Check-in failed: ${e.toString()}', isError: true);
                     } finally {
@@ -142,6 +156,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
+                  // Show progress indicator or text based on isCheckingIn state
                   child: isCheckingIn
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Text('Check In'),
@@ -157,6 +172,8 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   @override
   void dispose() {
     // Dispose controllers if any were defined directly in this state
+    // In this case, controllers are created within showCheckInDialog and should be disposed there if needed,
+    // but they are local to the dialog build context.
     super.dispose();
   }
 
@@ -311,8 +328,12 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
                   // --- Success State: Display Lectures ---
                   final lectures = snapshot.data!;
-                  // Sort lectures, newest first based on start time
-                  lectures.sort((a, b) => b.startTime.compareTo(a.startTime));
+                  // Sort lectures, newest first based on lecture date and then start time
+                  lectures.sort((a, b) {
+                     int dateComp = b.lectureDate.compareTo(a.lectureDate);
+                     if (dateComp != 0) return dateComp;
+                     return b.startTime.compareTo(a.startTime); // Sort by start time if dates are same
+                  });
 
                   return ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(), // Ensure scroll physics for RefreshIndicator
@@ -369,7 +390,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                // Check-in button
+                                // Check-in button - triggers the modified dialog
                                 ElevatedButton.icon(
                                   icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
                                   label: const Text('Check-In'),

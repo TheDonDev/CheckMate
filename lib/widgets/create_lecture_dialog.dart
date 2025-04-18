@@ -332,7 +332,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   items: _currentDepartments.map((String department) => DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis))).toList(),
                   // Disable if no school is selected or no departments available
                   onChanged: _currentDepartments.isEmpty ? null : (String? newValue) {
-                    setState(() { _selectedDepartment = newValue; _selectedCourse = null; /* No need to call _updateDependentDropdowns here */ });
+                    setState(() { _selectedDepartment = newValue; _selectedCourse = null; });
                   },
                   validator: (value) => _selectedSchool != null && value == null ? 'Department is required' : null,
                   isExpanded: true,

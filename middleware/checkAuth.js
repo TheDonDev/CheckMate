@@ -1,5 +1,5 @@
 // middleware/checkAuth.js
-const { admin } = require('../firebase'); // Assuming firebase.js exports initialized admin SDK
+const { admin } = require('../firebase');
 
 const checkAuth = async (req, res, next) => {
     // --- Log entry point and request path ---
@@ -25,7 +25,7 @@ const checkAuth = async (req, res, next) => {
         req.userData = {
             userId: decodedToken.uid,
             email: decodedToken.email,
-            // You can add other token claims if needed (e.g., name, picture from token)
+            // Add other token claims if needed (e.g., name, picture from token)
         };
 
         // --- Log attached user data ---

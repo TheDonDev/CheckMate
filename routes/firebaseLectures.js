@@ -191,9 +191,9 @@ router.get('/student', checkAuth, async (req, res) => {
     query = query.where('semester', '==', semester);     // Compare string value
 
     // Optional: Filter for lectures starting today or later
-    // const today = new Date();
-    // today.setHours(0, 0, 0, 0); // Start of day
-    // query = query.where('lectureDate', '>=', today);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Start of day
+    query = query.where('lectureDate', '>=', today);
 
     // Order results
     // IMPORTANT: This composite query likely requires a Firestore index!

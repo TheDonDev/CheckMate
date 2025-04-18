@@ -33,13 +33,13 @@ String? _toIso8601String(dynamic dateOrTimestamp) {
 
 class AttendanceRecord {
   final String id; // Firestore document ID or API ID
-  final String lectureId; // Added: ID of the lecture this record belongs to
+  final String lectureId;
   final String studentId;
   final String studentName; // Denormalized for easier display
   final String studentCourse; // Denormalized
-  final String visitNumber;
-  final Timestamp joinedAt; // When the student generated the visit number
-  final Timestamp? checkedInAt; // When the lecturer confirmed the visit number
+  final String registrationNumber; // Changed from visitNumber
+  final Timestamp joinedAt; // When the student joined the lecture
+  final Timestamp? checkedInAt; // When the lecturer checked the student in
   final String? checkedInBy; // Lecturer's User ID who checked them in
 
   AttendanceRecord({
@@ -48,7 +48,7 @@ class AttendanceRecord {
     required this.studentId,
     required this.studentName,
     required this.studentCourse,
-    required this.visitNumber,
+    required this.registrationNumber, // Changed
     required this.joinedAt,
     this.checkedInAt,
     this.checkedInBy,
@@ -68,9 +68,9 @@ class AttendanceRecord {
       studentId: data['studentId'] ?? '',
       studentName: data['studentName'] ?? 'Unknown Student',
       studentCourse: data['studentCourse'] ?? 'Unknown Course',
-      visitNumber: data['visitNumber'] ?? 'N/A',
-      joinedAt: data['joinedAt'] as Timestamp? ?? Timestamp.now(), // Default to now if missing
-      checkedInAt: data['checkedInAt'] as Timestamp?, // Nullable
+      registrationNumber: data['registrationNumber'] ?? 'N/A', // Changed, provide default
+      joinedAt: _parseTimestamp(data['joinedAt']) ?? Timestamp.now(), // Use helper, provide default
+      checkedInAt: _parseTimestamp(data['checkedInAt']), // Use helper, nullable
       checkedInBy: data['checkedInBy'] as String?, // Nullable
     );
   }
@@ -81,7 +81,7 @@ class AttendanceRecord {
       'studentId': studentId,
       'studentName': studentName,
       'studentCourse': studentCourse,
-      'visitNumber': visitNumber,
+      'registrationNumber': registrationNumber, // Changed
       'joinedAt': joinedAt, // Store as Timestamp
       // Use FieldValue for server-side timestamp on creation/update if possible
       // 'checkedInAt': checkedInAt ?? FieldValue.delete(), // Store Timestamp or remove if null
@@ -97,12 +97,12 @@ class AttendanceRecord {
     // Adapt based on your specific API structure
     return AttendanceRecord(
       // Use 'id' or '_id' from API, fallback if needed
-      id: json['id'] ?? json['_id'] ?? json['visitNumber'] ?? '', // Example fallbacks
+      id: json['id'] ?? json['_id'] ?? json['registrationNumber'] ?? '', // Example fallbacks
       lectureId: json['lectureId'] ?? '', // Expect lectureId from API
       studentId: json['studentId'] ?? '',
       studentName: json['studentName'] ?? 'Unknown Student',
       studentCourse: json['studentCourse'] ?? 'Unknown Course',
-      visitNumber: json['visitNumber'] ?? 'N/A',
+      registrationNumber: json['registrationNumber'] ?? 'N/A', // Changed
       joinedAt: _parseTimestamp(json['joinedAt']) ?? Timestamp.now(), // Provide default
       checkedInAt: _parseTimestamp(json['checkedInAt']), // Nullable
       checkedInBy: json['checkedInBy'] as String?, // Nullable
@@ -112,7 +112,6 @@ class AttendanceRecord {
   Map<String, dynamic> toApiJson() {
     // Convert object to JSON map suitable for sending TO the API
     // Only include fields the API expects for creation/update
-    // Often, only specific fields are sent (e.g., visitNumber for check-in)
     // This method might not be needed if records are only created/updated via specific API actions (join, checkin)
     return {
       // 'id': id, // Usually not sent when creating/updating via actions
@@ -120,7 +119,7 @@ class AttendanceRecord {
       'studentId': studentId,
       'studentName': studentName, // May be redundant if backend gets from studentId
       'studentCourse': studentCourse, // May be redundant
-      'visitNumber': visitNumber,
+      'registrationNumber': registrationNumber, // Changed
       'joinedAt': _toIso8601String(joinedAt), // Send as ISO string
       'checkedInAt': _toIso8601String(checkedInAt), // Send as ISO string or null
       'checkedInBy': checkedInBy,
@@ -136,7 +135,7 @@ class AttendanceRecord {
     String? studentId,
     String? studentName,
     String? studentCourse,
-    String? visitNumber,
+    String? registrationNumber, // Changed
     Timestamp? joinedAt,
     Timestamp? checkedInAt,
     String? checkedInBy,
@@ -150,7 +149,7 @@ class AttendanceRecord {
       studentId: studentId ?? this.studentId,
       studentName: studentName ?? this.studentName,
       studentCourse: studentCourse ?? this.studentCourse,
-      visitNumber: visitNumber ?? this.visitNumber,
+      registrationNumber: registrationNumber ?? this.registrationNumber, // Changed
       joinedAt: joinedAt ?? this.joinedAt,
       checkedInAt: setCheckedInAtNull ? null : (checkedInAt ?? this.checkedInAt),
       checkedInBy: setCheckedInByNull ? null : (checkedInBy ?? this.checkedInBy),
@@ -159,7 +158,7 @@ class AttendanceRecord {
 
    @override
   String toString() {
-    return 'AttendanceRecord(id: $id, lectureId: $lectureId, studentName: $studentName, visitNumber: $visitNumber, joinedAt: $joinedAt, checkedIn: ${checkedInAt != null})';
+    return 'AttendanceRecord(id: $id, lectureId: $lectureId, studentName: $studentName, regNo: $registrationNumber, joinedAt: $joinedAt, checkedIn: ${checkedInAt != null})'; // Changed
   }
 
    @override
@@ -169,7 +168,7 @@ class AttendanceRecord {
         other.id == id &&
         other.lectureId == lectureId &&
         other.studentId == studentId &&
-        other.visitNumber == visitNumber; // Compare key fields
+        other.registrationNumber == registrationNumber; // Changed: Compare key fields
   }
 
   @override
@@ -177,5 +176,5 @@ class AttendanceRecord {
       id.hashCode ^
       lectureId.hashCode ^
       studentId.hashCode ^
-      visitNumber.hashCode; // Hash key fields
+      registrationNumber.hashCode; // Changed: Hash key fields
 }
