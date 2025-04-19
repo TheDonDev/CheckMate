@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:provider/provider.dart';
+// Import for kDebugMode if needed elsewhere
 
 class LecturerDashboard extends StatefulWidget {
   final app_user.User currentUser;
@@ -75,7 +76,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   // --- Modified: Check-In Dialog uses Registration Number ---
   void showCheckInDialog(Lecture lecture) {
-    final registrationNumberController = TextEditingController(); // Changed controller name
+    final registrationNumberController = TextEditingController();
     bool isCheckingIn = false;
 
     showDialog(
@@ -88,7 +89,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), // Rounded corners
               title: Text('Check-In: ${lecture.unitName}'),
               content: TextField(
-                controller: registrationNumberController, // Use new controller
+                controller: registrationNumberController,
                 decoration: InputDecoration( // Apply consistent decoration
                   labelText: 'Student Registration Number', // Updated label
                   hintText: 'e.g., SCT211-00XX/YYYY', // Updated hint
@@ -127,11 +128,10 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                     }
                     setDialogState(() => isCheckingIn = true); // Show loading indicator
                     try {
-                      // Call API with registration number
+                      // *** CORRECT API CALL ***
                       final AttendanceRecord checkedInRecord = await apiService.checkInStudent(
                         lecture.id,
                         registrationNumber, // Pass registration number
-                        widget.currentUser.id, // Pass lecturer ID
                       );
                       // Check if dialog context is still mounted before interacting with it
                       if (!dialogContext.mounted) return;
@@ -171,9 +171,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   @override
   void dispose() {
-    // Dispose controllers if any were defined directly in this state
-    // In this case, controllers are created within showCheckInDialog and should be disposed there if needed,
-    // but they are local to the dialog build context.
+    // No controllers defined directly in this state to dispose here.
     super.dispose();
   }
 
@@ -218,10 +216,11 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
               // If confirmed and widget is mounted, perform logout and navigate
               if (confirm == true && mounted) {
                 await authService.logout();
+                // Use pushAndRemoveUntil to clear navigation stack
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                  (Route<dynamic> route) => false, // Remove all previous routes
+                  (Route<dynamic> route) => false,
                 );
               }
             },
@@ -280,7 +279,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                             Icon(Icons.error_outline, color: Colors.red.shade400, size: 48),
                             const SizedBox(height: 10),
                             Text(
-                              'Error loading lectures: ${snapshot.error}',
+                              'Error loading lectures.\nPlease check connection.', // Simplified error
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey.shade700),
                             ),
@@ -330,9 +329,37 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   final lectures = snapshot.data!;
                   // Sort lectures, newest first based on lecture date and then start time
                   lectures.sort((a, b) {
-                     int dateComp = b.lectureDate.compareTo(a.lectureDate);
-                     if (dateComp != 0) return dateComp;
-                     return b.startTime.compareTo(a.startTime); // Sort by start time if dates are same
+                    // *** Corrected Sorting Logic for Nullable DateTimes ***
+                    final aDate = a.lectureDate;
+                    final bDate = b.lectureDate;
+
+                    // Handle null dates (treat null as later/older for descending sort)
+                    if (aDate == null && bDate == null) {
+                      // Dates are both null, compare by start time
+                    } else if (aDate == null) {
+                      return 1; // a (null) comes after b (non-null)
+                    } else if (bDate == null) {
+                      return -1; // b (null) comes after a (non-null)
+                    } else {
+                      // Both dates are non-null, compare them descending
+                      int dateComp = bDate.compareTo(aDate);
+                      if (dateComp != 0) return dateComp;
+                      // Dates are the same, proceed to compare by start time
+                    }
+
+                    // Compare start times (descending, nulls last)
+                    final aTime = a.startTime;
+                    final bTime = b.startTime;
+                    if (aTime == null && bTime == null) {
+                      return 0; // Both times null, equal
+                    } else if (aTime == null) {
+                      return 1; // a (null) comes after b (non-null)
+                    } else if (bTime == null) {
+                      return -1; // b (null) comes after a (non-null)
+                    } else {
+                      // Both times non-null, compare descending
+                      return bTime.compareTo(aTime);
+                    }
                   });
 
                   return ListView.builder(
@@ -341,8 +368,8 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                     itemCount: lectures.length,
                     itemBuilder: (context, index) {
                       final lecture = lectures[index];
-                      // Format subtitle text
-                      final subtitleText = '${lecture.course}\n'
+                      // Format subtitle text using the model's getters
+                      final subtitleText = '${lecture.course ?? 'N/A'}\n' // Handle potential null course
                                            '${lecture.formattedDate} | ${lecture.formattedStartTime} - ${lecture.formattedEndTime}\n'
                                            'Venue: ${lecture.venue}';
 

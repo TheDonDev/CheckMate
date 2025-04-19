@@ -4,6 +4,7 @@ import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/api_service.dart'; // Import ApiService
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart'; // For date formatting
+import 'package:flutter/foundation.dart'; // Import for kDebugMode
 
 class LectureAttendanceScreen extends StatefulWidget {
   final Lecture lecture;
@@ -34,6 +35,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   void _loadAttendance() {
     if (!mounted) return; // Check if widget is still in the tree
     setState(() {
+      // Fetch attendance records for the specific lecture ID
       _attendanceFuture = _apiService.getLectureAttendance(widget.lecture.id);
     });
   }
@@ -41,26 +43,27 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    // Construct subtitle safely, handling potential nulls from lecture model
     final appBarSubtitle = '${widget.lecture.formattedDate} | ${widget.lecture.formattedStartTime} - ${widget.lecture.formattedEndTime} | ${widget.lecture.venue}';
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.lecture.unitName, style: const TextStyle(fontSize: 18)), // Slightly smaller title
-        backgroundColor: brandColor, // Apply brand color
-        foregroundColor: Colors.white, // Ensure text/icons are white
-        elevation: 2.0, // Consistent elevation
+        title: Text(widget.lecture.unitName, style: const TextStyle(fontSize: 18)),
+        backgroundColor: brandColor,
+        foregroundColor: Colors.white,
+        elevation: 2.0,
         bottom: PreferredSize(
            preferredSize: const Size.fromHeight(25.0),
            child: Padding(
-             padding: const EdgeInsets.only(bottom: 8.0, left: 16.0, right: 16.0), // Add horizontal padding
+             padding: const EdgeInsets.only(bottom: 8.0, left: 16.0, right: 16.0),
              child: Text(
                appBarSubtitle,
                style: TextStyle(
-                 color: Colors.white.withOpacity(0.9), // Slightly brighter subtitle
+                 color: Colors.white.withOpacity(0.9),
                  fontSize: 13,
                ),
                textAlign: TextAlign.center,
-               overflow: TextOverflow.ellipsis, // Prevent overflow
+               overflow: TextOverflow.ellipsis,
              ),
            ),
         ),
@@ -73,27 +76,31 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
         ],
       ),
       body: RefreshIndicator( // Add pull-to-refresh
-        color: brandColor, // Set refresh indicator color
+        color: brandColor,
         onRefresh: () async => _loadAttendance(),
         child: FutureBuilder<List<AttendanceRecord>>(
-          future: _attendanceFuture, // Use state variable
+          future: _attendanceFuture,
           builder: (context, snapshot) {
             // Handle Loading
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return Center(child: CircularProgressIndicator(color: brandColor)); // Use brand color
+              return Center(child: CircularProgressIndicator(color: brandColor));
             }
             // Handle Error
             if (snapshot.hasError) {
                print("Error loading attendance: ${snapshot.error}");
+               print("Error details: ${snapshot.error.runtimeType} ${snapshot.stackTrace}"); // More detailed error logging
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: Column( // Use Column for icon + text
+                  child: Column(
                      mainAxisAlignment: MainAxisAlignment.center,
                      children: [
                        Icon(Icons.error_outline, color: Colors.red.shade400, size: 48),
                        const SizedBox(height: 10),
-                       Text('Error loading attendance: ${snapshot.error}\nPull down to retry.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700)),
+                       Text('Error loading attendance list.\nPlease check your connection and pull down to retry.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700)),
+                       // Optionally show more error details in debug mode
+                       // *** Added check for kDebugMode ***
+                       if (kDebugMode) Text('\n${snapshot.error}', style: TextStyle(fontSize: 10, color: Colors.grey)),
                      ],
                   )
                 )
@@ -101,7 +108,6 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
             }
             // Handle No Data
             if (!snapshot.hasData || snapshot.data!.isEmpty) {
-              // Use LayoutBuilder and SingleChildScrollView for consistent pull-to-refresh behavior
               return LayoutBuilder(builder: (context, constraints) {
                  return SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -110,7 +116,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                        child: Center(
                          child: Padding(
                            padding: const EdgeInsets.all(20.0),
-                           child: Column( // Use Column for icon + text
+                           child: Column(
                              mainAxisAlignment: MainAxisAlignment.center,
                              children: [
                                Icon(Icons.people_outline, size: 50, color: Colors.grey.shade400),
@@ -133,11 +139,24 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
             final attendanceList = snapshot.data!;
             // Sort: Checked-in students first (by check-in time), then joined students (by name)
             attendanceList.sort((a, b) {
-               final aCheckedIn = a.checkedInAt != null;
-               final bCheckedIn = b.checkedInAt != null;
+               // Use the correct boolean field 'checkedIn'
+               final bool aCheckedIn = a.checkedIn;
+               final bool bCheckedIn = b.checkedIn;
+
                if (aCheckedIn && bCheckedIn) {
                  // Sort checked-in by time (earliest first)
-                 return a.checkedInAt!.compareTo(b.checkedInAt!);
+                 // Use the correct field 'checkInTime' and handle potential nulls defensively
+                 final aTime = a.checkInTime;
+                 final bTime = b.checkInTime;
+                 if (aTime != null && bTime != null) {
+                    return aTime.compareTo(bTime);
+                 } else if (aTime != null) {
+                    return -1; // Treat null time as later
+                 } else if (bTime != null) {
+                    return 1; // Treat null time as later
+                 } else {
+                    return 0; // Both null, treat as equal for time sorting
+                 }
                } else if (aCheckedIn) { return -1; } // Checked-in comes before joined
                else if (bCheckedIn) { return 1; } // Joined comes after checked-in
                else {
@@ -147,64 +166,64 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
             });
 
             return ListView.separated(
-              // Add physics for RefreshIndicator
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 0), // Remove horizontal padding for full width divider
+              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 0),
               itemCount: attendanceList.length,
-              separatorBuilder: (context, index) => const Divider(height: 0.5, thickness: 0.5, indent: 72, endIndent: 16), // Indent divider past avatar
+              separatorBuilder: (context, index) => const Divider(height: 0.5, thickness: 0.5, indent: 72, endIndent: 16),
               itemBuilder: (context, index) {
                 final record = attendanceList[index];
-                final bool isCheckedIn = record.checkedInAt != null;
+                // Use the correct boolean field 'checkedIn'
+                final bool isCheckedIn = record.checkedIn;
                 final String statusText;
                 final Color statusColor;
                 final IconData statusIcon;
                 final String timeString;
 
                 if (isCheckedIn) {
-                  // Format time like '5:08 PM'
-                  timeString = DateFormat.jm().format(record.checkedInAt!.toDate().toLocal());
+                  // Use the correct field 'checkInTime'
+                  // Format time like '5:08 PM', handle potential null checkInTime
+                  timeString = record.checkInTime != null
+                      ? DateFormat.jm().format(record.checkInTime!.toDate().toLocal())
+                      : 'N/A'; // Fallback if time is null despite checkedIn=true
                   statusText = 'Checked In @ $timeString';
-                  statusColor = Colors.green.shade700; // Darker green for checked in
+                  statusColor = Colors.green.shade700;
                   statusIcon = Icons.check_circle;
                 } else {
-                  // Format time like '5:08 PM'
+                  // Format joined time
                   timeString = DateFormat.jm().format(record.joinedAt.toDate().toLocal());
-                  statusText = 'Joined @ $timeString'; // Simplified status for joined
-                  statusColor = Colors.orange.shade800; // Darker orange for joined but not checked in
-                  statusIcon = Icons.hourglass_top_rounded; // Icon indicating waiting/pending check-in
+                  statusText = 'Joined @ $timeString';
+                  statusColor = Colors.orange.shade800;
+                  statusIcon = Icons.hourglass_top_rounded;
                 }
 
                 return ListTile(
-                  // Use index + 1 for numbering in the leading avatar
                   leading: CircleAvatar(
-                    backgroundColor: statusColor.withOpacity(0.12), // Subtle background based on status
-                    foregroundColor: statusColor, // Icon/Text color based on status
+                    backgroundColor: statusColor.withOpacity(0.12),
+                    foregroundColor: statusColor,
                     child: Text(
                       (index + 1).toString(),
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                   ),
-                  // Display Student Name and Registration Number clearly
                   title: Text(record.studentName, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
-                  // *** Updated Subtitle to show Registration Number ***
+                  // *** Corrected Subtitle: Removed studentCourse ***
                   subtitle: Text(
-                    'Reg #: ${record.registrationNumber} | Course: ${record.studentCourse}',
+                    'Reg #: ${record.registrationNumber}', // Only show registration number
                     style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700),
                   ),
-                  // Use a Chip for status, making it more visually distinct
                   trailing: Chip(
                     avatar: Icon(statusIcon, color: statusColor, size: 16),
                     label: Text(
                       statusText,
                       style: TextStyle(fontSize: 11.5, color: statusColor, fontWeight: FontWeight.w500),
-                      overflow: TextOverflow.ellipsis, // Prevent overflow on small screens
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    backgroundColor: statusColor.withOpacity(0.1), // Subtle background
-                    side: BorderSide.none, // Remove border
+                    backgroundColor: statusColor.withOpacity(0.1),
+                    side: BorderSide.none,
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    visualDensity: VisualDensity.compact, // Make chip smaller
+                    visualDensity: VisualDensity.compact,
                   ),
-                  dense: true, // Make list tile slightly more compact
+                  dense: true,
                 );
               },
             );

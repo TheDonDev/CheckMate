@@ -1,45 +1,50 @@
 // lib/models/lecture.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart'; // For immutable annotation
 import 'package:intl/intl.dart';
 
-// Helper function (can be placed here or in a utility file)
-Timestamp? _parseTimestamp(dynamic timestampData) {
+// --- Helper Functions (Consider moving to a dedicated utility file) ---
+
+// Parses various timestamp formats (Firestore Timestamp, ISO String, int milliseconds)
+// into a nullable DateTime object (UTC).
+DateTime? _parseDateTime(dynamic timestampData) {
   if (timestampData == null) return null;
-  // Assuming API sends ISO 8601 string or Firestore-like map { _seconds: ..., _nanoseconds: ... }
-  if (timestampData is String) {
-    try {
-      return Timestamp.fromDate(DateTime.parse(timestampData));
-    } catch (e) {
-      print("Error parsing timestamp string: $timestampData, Error: $e");
-      return null; // Or return a default Timestamp
+  try {
+    if (timestampData is Timestamp) {
+      return timestampData.toDate().toUtc(); // Convert Firestore Timestamp to UTC DateTime
+    } else if (timestampData is String) {
+      // Assume ISO 8601 string
+      return DateTime.parse(timestampData).toUtc();
+    } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
+      // Handle Firestore-like map (less common on client)
+      final ts = Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
+      return ts.toDate().toUtc();
+    } else if (timestampData is int) {
+      // Assume milliseconds since epoch
+      return DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
     }
-  } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
-    return Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
-  } else if (timestampData is int) {
-    // Assuming milliseconds since epoch if it's an int
-    return Timestamp.fromMillisecondsSinceEpoch(timestampData);
+  } catch (e) {
+    print("Error parsing DateTime: $timestampData, Error: $e");
   }
-  print("Unrecognized timestamp format: $timestampData");
-  return null; // Or throw error
+  print("Unrecognized DateTime format: $timestampData");
+  return null; // Return null if parsing fails
 }
 
-// Helper to convert Timestamp/DateTime to ISO string for API
-String? _toIso8601String(dynamic dateOrTimestamp) {
-  if (dateOrTimestamp == null) return null;
-  if (dateOrTimestamp is Timestamp) {
-    return dateOrTimestamp.toDate().toIso8601String();
-  } else if (dateOrTimestamp is DateTime) {
-    return dateOrTimestamp.toIso8601String();
-  }
-  return null;
+// Converts a nullable DateTime object to an ISO 8601 UTC string.
+String? _toIso8601UtcString(DateTime? dateTime) {
+  if (dateTime == null) return null;
+  // Ensure the DateTime is treated as UTC before formatting
+  return dateTime.toUtc().toIso8601String();
 }
 
+// --- Lecture Model ---
 
+@immutable // Mark class as immutable
 class Lecture {
   final String id;
   final String lecturerId;
   final String lecturerName;
-  final String lecturerPhone;
+  final String? lecturerPhone; // Made nullable to match backend logic
   final String school;
   final String department;
   final String course;
@@ -47,17 +52,17 @@ class Lecture {
   final String semester;
   final String unitName;
   final String unitCode;
-  final DateTime lectureDate; // Keep as DateTime for UI formatting
-  final Timestamp startTime;
-  final Timestamp endTime;
+  final DateTime? lectureDate; // Changed to nullable DateTime
+  final DateTime? startTime;   // Changed to nullable DateTime
+  final DateTime? endTime;     // Changed to nullable DateTime
   final String venue;
-  final DateTime createdAt; // Keep as DateTime for UI formatting
+  final DateTime? createdAt;   // Changed to nullable DateTime
 
-  Lecture({
+  const Lecture({ // Use const constructor
     required this.id,
     required this.lecturerId,
     required this.lecturerName,
-    required this.lecturerPhone,
+    this.lecturerPhone, // Nullable
     required this.school,
     required this.department,
     required this.course,
@@ -65,97 +70,53 @@ class Lecture {
     required this.semester,
     required this.unitName,
     required this.unitCode,
-    required this.lectureDate,
-    required this.startTime,
-    required this.endTime,
+    required this.lectureDate, // Keep required based on backend validation
+    required this.startTime,   // Keep required based on backend validation
+    required this.endTime,     // Keep required based on backend validation
     required this.venue,
-    required this.createdAt,
+    this.createdAt, // Nullable, often set by server
   });
 
-  // --- Formatting Getters (Keep as they are useful for UI) ---
-  String get formattedDate => DateFormat.yMMMEd().format(lectureDate);
-  String get formattedStartTime => DateFormat.jm().format(startTime.toDate());
-  String get formattedEndTime => DateFormat.jm().format(endTime.toDate());
+  // --- Formatting Getters (for UI display, handle nulls) ---
+  String get formattedDate => lectureDate != null ? DateFormat.yMMMEd().format(lectureDate!.toLocal()) : 'N/A';
+  String get formattedStartTime => startTime != null ? DateFormat.jm().format(startTime!.toLocal()) : 'N/A';
+  String get formattedEndTime => endTime != null ? DateFormat.jm().format(endTime!.toLocal()) : 'N/A';
+  String get formattedCreatedAt => createdAt != null ? DateFormat.yMd().add_jm().format(createdAt!.toLocal()) : 'N/A';
 
-  // --- Firestore Conversion (Keep if needed elsewhere, but not for ApiService) ---
-  Map<String, dynamic> toJson() { // Renamed from toJson to avoid confusion
-    return {
-      'lecturerId': lecturerId,
-      'lecturerName': lecturerName,
-      'lecturerPhone': lecturerPhone,
-      'school': school,
-      'department': department,
-      'course': course,
-      'yearOfStudy': yearOfStudy,
-      'semester': semester,
-      'unitName': unitName,
-      'unitCode': unitCode,
-      'lectureDate': Timestamp.fromDate(lectureDate),
-      'startTime': startTime,
-      'endTime': endTime,
-      'venue': venue,
-      'createdAt': Timestamp.fromDate(createdAt),
-    };
-  }
 
-  factory Lecture.fromJson(DocumentSnapshot doc) { // Renamed from fromJson
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-    DateTime timestampToDateTime(Timestamp? timestamp) {
-      return timestamp?.toDate() ?? DateTime(1970);
-    }
+  // --- Firestore Conversion ---
+  // Creates a Lecture object from a Firestore DocumentSnapshot
+  factory Lecture.fromFirestore(DocumentSnapshot doc) {
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
+
     return Lecture(
       id: doc.id,
-      lecturerId: data['lecturerId'] ?? '',
-      lecturerName: data['lecturerName'] ?? '',
-      lecturerPhone: data['lecturerPhone'] ?? '',
-      school: data['school'] ?? '',
-      department: data['department'] ?? '',
-      course: data['course'] ?? '',
-      yearOfStudy: data['yearOfStudy'] ?? '',
-      semester: data['semester'] ?? '',
-      unitName: data['unitName'] ?? '',
-      unitCode: data['unitCode'] ?? '',
-      lectureDate: timestampToDateTime(data['lectureDate'] as Timestamp?),
-      startTime: data['startTime'] as Timestamp? ?? Timestamp.fromDate(DateTime(1970)),
-      endTime: data['endTime'] as Timestamp? ?? Timestamp.fromDate(DateTime(1970)),
-      venue: data['venue'] ?? '',
-      createdAt: timestampToDateTime(data['createdAt'] as Timestamp?),
+      lecturerId: data['lecturerId'] as String? ?? '',
+      lecturerName: data['lecturerName'] as String? ?? 'N/A',
+      lecturerPhone: data['lecturerPhone'] as String?, // Nullable
+      school: data['school'] as String? ?? '',
+      department: data['department'] as String? ?? '',
+      course: data['course'] as String? ?? '',
+      yearOfStudy: data['yearOfStudy'] as String? ?? '',
+      semester: data['semester'] as String? ?? '',
+      unitName: data['unitName'] as String? ?? '',
+      unitCode: data['unitCode'] as String? ?? '',
+      lectureDate: _parseDateTime(data['lectureDate']), // Use helper
+      startTime: _parseDateTime(data['startTime']),     // Use helper
+      endTime: _parseDateTime(data['endTime']),         // Use helper
+      venue: data['venue'] as String? ?? '',
+      createdAt: _parseDateTime(data['createdAt']),     // Use helper
     );
   }
 
-  // --- API Conversion Methods ---
-  factory Lecture.fromApiJson(Map<String, dynamic> json) {
-    // Adapt this based on the actual structure returned by your API
-    return Lecture(
-      // Use 'id' or '_id' depending on your backend convention
-      id: json['id'] ?? json['_id'] ?? '',
-      lecturerId: json['lecturerId'] ?? '',
-      lecturerName: json['lecturerName'] ?? '',
-      lecturerPhone: json['lecturerPhone'] ?? '',
-      school: json['school'] ?? '',
-      department: json['department'] ?? '',
-      course: json['course'] ?? '',
-      yearOfStudy: json['yearOfStudy'] ?? '',
-      semester: json['semester'] ?? '',
-      unitName: json['unitName'] ?? '',
-      unitCode: json['unitCode'] ?? '',
-      // Parse Timestamps carefully based on API format (e.g., ISO string)
-      lectureDate: (json['lectureDate'] != null) ? DateTime.parse(json['lectureDate']) : DateTime(1970),
-      startTime: _parseTimestamp(json['startTime']) ?? Timestamp.fromDate(DateTime(1970)),
-      endTime: _parseTimestamp(json['endTime']) ?? Timestamp.fromDate(DateTime(1970)),
-      venue: json['venue'] ?? '',
-      // Use 'createdAt' or other field name from API
-      createdAt: (json['createdAt'] != null) ? DateTime.parse(json['createdAt']) : DateTime(1970),
-    );
-  }
-
-  Map<String, dynamic> toApiJson() {
-    // Convert object to JSON map suitable for sending TO the API
+  // Converts Lecture object to a Map suitable for writing TO Firestore
+  // Less common if creation/updates happen via API, but useful for direct interaction.
+  Map<String, dynamic> toFirestore() {
     return {
-      // Don't usually send 'id' when creating
+      // 'id' is the document ID, not usually stored within the document itself
       'lecturerId': lecturerId,
       'lecturerName': lecturerName,
-      'lecturerPhone': lecturerPhone,
+      if (lecturerPhone != null) 'lecturerPhone': lecturerPhone, // Only include if not null
       'school': school,
       'department': department,
       'course': course,
@@ -163,19 +124,70 @@ class Lecture {
       'semester': semester,
       'unitName': unitName,
       'unitCode': unitCode,
-      // Send dates/timestamps as ISO strings (common practice)
-      'lectureDate': _toIso8601String(lectureDate),
-      'startTime': _toIso8601String(startTime),
-      'endTime': _toIso8601String(endTime),
       'venue': venue,
-      // 'createdAt' is usually set by the server, but send if API requires it
-      'createdAt': _toIso8601String(createdAt),
+      // Convert DateTime back to Firestore Timestamp or null
+      'lectureDate': lectureDate != null ? Timestamp.fromDate(lectureDate!) : null,
+      'startTime': startTime != null ? Timestamp.fromDate(startTime!) : null,
+      'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
+      // 'createdAt' is usually set by the server (FieldValue.serverTimestamp()) on creation
+      // Only include if explicitly updating or needing to store client-set time
+      // 'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
+    };
+  }
+  // --- End Firestore Conversion ---
+
+
+  // --- API Conversion Methods ---
+  // Creates a Lecture object from a JSON map received FROM the API
+  factory Lecture.fromApiJson(Map<String, dynamic> json) {
+    return Lecture(
+      // Use 'id' or '_id' depending on your backend API convention
+      id: json['id'] as String? ?? json['_id'] as String? ?? '',
+      lecturerId: json['lecturerId'] as String? ?? '',
+      lecturerName: json['lecturerName'] as String? ?? 'N/A',
+      lecturerPhone: json['lecturerPhone'] as String?, // Nullable
+      school: json['school'] as String? ?? '',
+      department: json['department'] as String? ?? '',
+      course: json['course'] as String? ?? '',
+      yearOfStudy: json['yearOfStudy'] as String? ?? '',
+      semester: json['semester'] as String? ?? '',
+      unitName: json['unitName'] as String? ?? '',
+      unitCode: json['unitCode'] as String? ?? '',
+      // Parse dates/times from API format (likely ISO strings) using helper
+      lectureDate: _parseDateTime(json['lectureDate']),
+      startTime: _parseDateTime(json['startTime']),
+      endTime: _parseDateTime(json['endTime']),
+      venue: json['venue'] as String? ?? '',
+      createdAt: _parseDateTime(json['createdAt']), // Use 'createdAt' or API field name
+    );
+  }
+
+  // Converts Lecture object to a JSON map suitable for sending TO the API
+  Map<String, dynamic> toApiJson() {
+    return {
+      // Don't usually send 'id' when creating via API
+      // 'lecturerId' might be inferred from auth token on backend
+      // 'lecturerName' might be inferred from auth token on backend
+      if (lecturerPhone != null) 'lecturerPhone': lecturerPhone, // Send if available
+      'school': school,
+      'department': department,
+      'course': course,
+      'yearOfStudy': yearOfStudy,
+      'semester': semester,
+      'unitName': unitName,
+      'unitCode': unitCode,
+      'venue': venue,
+      // Send dates/timestamps as ISO strings (UTC)
+      'lectureDate': _toIso8601UtcString(lectureDate),
+      'startTime': _toIso8601UtcString(startTime),
+      'endTime': _toIso8601UtcString(endTime),
+      // 'createdAt' is usually set by the server, don't send unless API requires it
     };
   }
   // --- End API Conversion ---
 
 
-  // copyWith, toString, ==, hashCode remain largely the same
+  // --- Utility Methods ---
    Lecture copyWith({
     String? id,
     String? lecturerId,
@@ -189,16 +201,22 @@ class Lecture {
     String? unitName,
     String? unitCode,
     DateTime? lectureDate,
-    Timestamp? startTime,
-    Timestamp? endTime,
+    DateTime? startTime,
+    DateTime? endTime,
     String? venue,
     DateTime? createdAt,
+    // Flags for explicitly setting nullable fields to null
+    bool setLecturerPhoneNull = false,
+    bool setLectureDateNull = false,
+    bool setStartTimeNull = false,
+    bool setEndTimeNull = false,
+    bool setCreatedAtNull = false,
   }) {
     return Lecture(
       id: id ?? this.id,
       lecturerId: lecturerId ?? this.lecturerId,
       lecturerName: lecturerName ?? this.lecturerName,
-      lecturerPhone: lecturerPhone ?? this.lecturerPhone,
+      lecturerPhone: setLecturerPhoneNull ? null : (lecturerPhone ?? this.lecturerPhone),
       school: school ?? this.school,
       department: department ?? this.department,
       course: course ?? this.course,
@@ -206,25 +224,61 @@ class Lecture {
       semester: semester ?? this.semester,
       unitName: unitName ?? this.unitName,
       unitCode: unitCode ?? this.unitCode,
-      lectureDate: lectureDate ?? this.lectureDate,
-      startTime: startTime ?? this.startTime,
-      endTime: endTime ?? this.endTime,
+      lectureDate: setLectureDateNull ? null : (lectureDate ?? this.lectureDate),
+      startTime: setStartTimeNull ? null : (startTime ?? this.startTime),
+      endTime: setEndTimeNull ? null : (endTime ?? this.endTime),
       venue: venue ?? this.venue,
-      createdAt: createdAt ?? this.createdAt,
+      createdAt: setCreatedAtNull ? null : (createdAt ?? this.createdAt),
     );
   }
 
   @override
   String toString() {
-    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, year: $yearOfStudy, sem: $semester, date: $formattedDate, time: $formattedStartTime-$formattedEndTime)';
+    // Provide a more informative default toString
+    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: ${lectureDate?.toIso8601String()}, start: ${startTime?.toIso8601String()}, end: ${endTime?.toIso8601String()}, venue: $venue)';
   }
 
+  // Implement == and hashCode based on all fields for proper comparison
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is Lecture && other.id == id /* && other fields...*/;
+
+    return other is Lecture &&
+      other.id == id &&
+      other.lecturerId == lecturerId &&
+      other.lecturerName == lecturerName &&
+      other.lecturerPhone == lecturerPhone &&
+      other.school == school &&
+      other.department == department &&
+      other.course == course &&
+      other.yearOfStudy == yearOfStudy &&
+      other.semester == semester &&
+      other.unitName == unitName &&
+      other.unitCode == unitCode &&
+      other.lectureDate == lectureDate &&
+      other.startTime == startTime &&
+      other.endTime == endTime &&
+      other.venue == venue &&
+      other.createdAt == createdAt;
   }
 
   @override
-  int get hashCode => id.hashCode /* ^ other fields...*/;
+  int get hashCode => Object.hash(
+        id,
+        lecturerId,
+        lecturerName,
+        lecturerPhone,
+        school,
+        department,
+        course,
+        yearOfStudy,
+        semester,
+        unitName,
+        unitCode,
+        lectureDate,
+        startTime,
+        endTime,
+        venue,
+        createdAt,
+      );
 }

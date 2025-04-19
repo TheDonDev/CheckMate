@@ -3,6 +3,7 @@ import 'package:checkmate/constants/dropdown_data.dart'; // Import constants
 import 'package:checkmate/screens/login_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Import for input formatters
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -12,24 +13,32 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
+  // --- Controllers ---
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
-  final TextEditingController _registrationNumberController = TextEditingController(); // Added
+  final TextEditingController _registrationNumberController = TextEditingController();
+  final TextEditingController _phoneNumberController = TextEditingController(); // Added Phone Number Controller
+
+  // --- Services ---
   final AuthService _authService = AuthService();
+
+  // --- State Variables ---
   String? _selectedSchool;
   String? _selectedDepartment;
   String? _selectedCourse;
+  String? _selectedYearOfStudy; // Added Year of Study state
+  String? _selectedSemester;   // Added Semester state
   bool _isLoading = false;
-  bool _showRegistrationNumberField = false; // Added state for conditional field
+  bool _isStudent = false; // Renamed from _showRegistrationNumberField for clarity
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   final _formKey = GlobalKey<FormState>();
 
-  // Define the brand color (consistent with WelcomeScreen & LoginScreen)
-  static const Color brandColor = Color(0xFF0175C2);
+  // --- Constants ---
+  static const Color brandColor = Color(0xFF0175C2); // Consistent brand color
 
   @override
   void initState() {
@@ -45,20 +54,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _registrationNumberController.dispose(); // Dispose controller
+    _registrationNumberController.dispose();
+    _phoneNumberController.dispose(); // Dispose phone controller
     super.dispose();
   }
 
-  // Check email domain to show/hide registration number field
+  // Check email domain to show/hide student-specific fields
   void _checkEmailDomain() {
     final email = _emailController.text.trim().toLowerCase();
-    // Ensure the domain check is accurate for your specific student emails
+    // Use the specified student domain
     final bool isStudentEmail = email.endsWith('@student.au.ac.ke');
-    if (_showRegistrationNumberField != isStudentEmail) {
+    if (_isStudent != isStudentEmail) {
       setState(() {
-        _showRegistrationNumberField = isStudentEmail;
+        _isStudent = isStudentEmail;
+        // Clear student-specific fields if email is no longer a student email
         if (!isStudentEmail) {
-          _registrationNumberController.clear(); // Clear field if hidden
+          _registrationNumberController.clear();
+          _selectedYearOfStudy = null; // Clear year selection
+          _selectedSemester = null;   // Clear semester selection
         }
       });
     }
@@ -78,44 +91,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // Registration Action - Updated to include registrationNumber
+  // Registration Action - Updated to include all new fields
   Future<void> _handleRegister() async {
+    // Validate the form first
     if (!_formKey.currentState!.validate()) {
+      _showSnackBar('Please fix the errors in the form.', isError: true);
       return; // Don't proceed if form is invalid
     }
+
+    // Check network connection
+    // final connectivityResult = await Connectivity().checkConnectivity();
+    // if (connectivityResult == ConnectivityResult.none) {
+    //   _showSnackBar('No internet connection.', isError: true);
+    //   return;
+    // }
+
 
     if (!mounted) return;
     setState(() { _isLoading = true; });
 
-    // Get registration number only if the field is visible (i.e., student email)
-    final registrationNumber = _showRegistrationNumberField
-        ? _registrationNumberController.text.trim()
-        : null;
+    // Get student-specific data only if the fields are visible (i.e., student email)
+    final registrationNumber = _isStudent ? _registrationNumberController.text.trim() : null;
+    final yearOfStudy = _isStudent ? _selectedYearOfStudy : null;
+    final semester = _isStudent ? _selectedSemester : null;
 
     try {
-      // Call AuthService signUp with all fields, including registrationNumber
+      // Call AuthService signUp with all fields using NAMED parameters for clarity
+      // Ensure your AuthService.signUp method signature matches these named parameters
       await _authService.signUp(
-        _nameController.text.trim(),
-        _emailController.text.trim(),
-        _passwordController.text,
-        _selectedSchool,
-        _selectedDepartment,
-        _selectedCourse,
-        registrationNumber, // Pass registration number (can be null)
+        name: _nameController.text.trim(),
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        phoneNumber: _phoneNumberController.text.trim(), // Pass phone number
+        school: _selectedSchool, // Already validated by form
+        department: _selectedDepartment, // Already validated by form
+        course: _selectedCourse, // Already validated by form
+        registrationNumber: registrationNumber, // Pass registration number (can be null)
+        yearOfStudy: yearOfStudy,               // Pass year of study (can be null)
+        semester: semester,                     // Pass semester (can be null)
       );
       if (!mounted) return;
       _showSuccessDialog(); // Show success message
     } on AuthException catch (e) {
-      print("Error during registration: $e");
+      print("AuthException during registration: ${e.message}");
       if (!mounted) return;
-      // Use the helper snackbar for errors
-      _showSnackBar(e.message, isError: true);
+      _showSnackBar(e.message, isError: true); // Show specific auth error
     } catch (e) {
       // Handle unexpected errors
       print("Unexpected error during registration: $e");
       if (!mounted) return;
-      _showSnackBar('An unexpected error occurred. Please try again.', isError: true);
+      _showSnackBar('An unexpected error occurred. Please try again later.', isError: true);
     } finally {
+      // Ensure loading indicator is turned off even if widget is disposed during async operation
       if (mounted) {
         setState(() { _isLoading = false; });
       }
@@ -157,6 +184,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         filled: true,
         fillColor: Colors.grey[50], // Slightly off-white background
         contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+        errorStyle: TextStyle(fontSize: 12, color: colorScheme.error), // Consistent error style
       );
     }
 
@@ -166,10 +194,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         backgroundColor: brandColor, // Apply brand color
         foregroundColor: Colors.white, // Ensure text/icons are white
         elevation: 2.0,
-        // Back button is automatically implied
       ),
       body: Padding(
-        padding: const EdgeInsets.all(20.0), // Adjusted padding
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0), // Adjusted padding
         child: Form(
           key: _formKey, // Use _formKey
           child: SingleChildScrollView(
@@ -185,31 +212,77 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     hint: 'Enter your full name',
                     prefixIcon: Icon(Icons.person_outline, color: brandColor.withOpacity(0.7)),
                   ),
-                  validator: (value) => (value == null || value.isEmpty) ? 'Please enter your name' : null,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your name';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.next,
                 ),
                 const SizedBox(height: 18), // Consistent spacing
+
                 // Email Field
                 TextFormField(
                   controller: _emailController,
                   decoration: inputDecoration(
                     'Email Address',
-                    hint: 'Enter university email (@student.au.ac.ke or @au.ac.ke)', // More specific hint
+                    hint: 'Enter university email (@student.au.ac.ke or @au.ac.ke)', // Specific hint
                     prefixIcon: Icon(Icons.email_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   validator: (value) {
-                    if (value == null || value.isEmpty) return 'Please enter your email';
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your email';
+                    }
+                    final email = value.trim().toLowerCase();
                     // Basic email format check
-                    if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(value)) return 'Please enter a valid email';
-                    // Optional: More specific domain validation if needed
-                    // if (!value.toLowerCase().endsWith('.au.ac.ke')) return 'Please use your university email';
+                    if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(email)) {
+                      return 'Please enter a valid email address';
+                    }
+                    // Check if it ends with the university domain suffix
+                    if (!email.endsWith('au.ac.ke')) {
+                      return 'Please use your university email (@student.au.ac.ke or @au.ac.ke)';
+                    }
                     return null;
                   },
+                  textInputAction: TextInputAction.next,
                 ),
                 const SizedBox(height: 18),
 
-                // --- Conditionally Display Registration Number Field ---
-                if (_showRegistrationNumberField) ...[
+                // Phone Number Field (Visible for everyone)
+                TextFormField(
+                  controller: _phoneNumberController,
+                  decoration: inputDecoration(
+                    'Phone Number',
+                    hint: 'e.g., 0712345678',
+                    prefixIcon: Icon(Icons.phone_outlined, color: brandColor.withOpacity(0.7)),
+                  ),
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly, // Allow only digits
+                    LengthLimitingTextInputFormatter(10), // Limit to 10 digits
+                  ],
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your phone number';
+                    }
+                    if (value.length != 10) {
+                      return 'Phone number must be 10 digits';
+                    }
+                    // Add more specific format validation if needed (e.g., starts with 07 or 01)
+                    if (!value.startsWith('0')) {
+                       return 'Phone number must start with 0';
+                    }
+                    return null;
+                  },
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 18),
+
+                // --- Conditionally Display Student-Specific Fields ---
+                if (_isStudent) ...[
+                  // Registration Number Field
                   TextFormField(
                     controller: _registrationNumberController,
                     decoration: inputDecoration(
@@ -218,23 +291,59 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       prefixIcon: Icon(Icons.badge_outlined, color: brandColor.withOpacity(0.7)),
                     ),
                     validator: (value) {
-                      // Required only if the field is shown
-                      if (_showRegistrationNumberField && (value == null || value.isEmpty)) {
+                      // Required only if the field is shown (i.e., isStudent is true)
+                      if (_isStudent && (value == null || value.trim().isEmpty)) {
                         return 'Please enter your registration number';
                       }
-                      // Add specific format validation if needed (e.g., length, pattern)
-                      // Example: Check for a specific pattern like ABC/123/XYZ
-                      // if (_showRegistrationNumberField && value != null && !RegExp(r'^[A-Z]{3}/\d{3}/[A-Z]{3}$').hasMatch(value.toUpperCase())) {
-                      //   return 'Invalid format (e.g., ABC/123/XYZ)';
-                      // }
+                      // Add specific format validation if needed
                       return null;
                     },
-                    // Optional: Improve keyboard type or capitalization based on expected format
                     textCapitalization: TextCapitalization.characters,
+                    textInputAction: TextInputAction.next,
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Year of Study Dropdown
+                  DropdownButtonFormField<String>(
+                    decoration: inputDecoration(
+                      'Year of Study',
+                      prefixIcon: Icon(Icons.calendar_today_outlined, color: brandColor.withOpacity(0.7)),
+                    ),
+                    value: _selectedYearOfStudy,
+                    items: yearsList.map((String year) { // Use yearsList from constants
+                      return DropdownMenuItem<String>(value: year, child: Text(year));
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedYearOfStudy = newValue;
+                      });
+                    },
+                    validator: (value) => _isStudent && value == null ? 'Please select year of study' : null,
+                    isExpanded: true,
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Semester Dropdown
+                  DropdownButtonFormField<String>(
+                    decoration: inputDecoration(
+                      'Current Semester',
+                      prefixIcon: Icon(Icons.schedule_outlined, color: brandColor.withOpacity(0.7)),
+                    ),
+                    value: _selectedSemester,
+                    items: semestersList.map((String semester) { // Use semestersList from constants
+                      return DropdownMenuItem<String>(value: semester, child: Text(semester));
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedSemester = newValue;
+                      });
+                    },
+                    validator: (value) => _isStudent && value == null ? 'Please select current semester' : null,
+                    isExpanded: true,
                   ),
                   const SizedBox(height: 18),
                 ],
-                // --- End Conditional Field ---
+                // --- End Conditional Fields ---
 
                 // Password Field
                 TextFormField(
@@ -253,12 +362,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   obscureText: _obscurePassword,
                   validator: (value) {
-                    if (value == null || value.isEmpty) return 'Please enter your password';
-                    if (value.length < 8) return 'Password must be at least 8 characters';
+                    if (value == null || value.isEmpty) {
+                      return 'Please enter your password';
+                    }
+                    if (value.length < 8) {
+                      return 'Password must be at least 8 characters';
+                    }
+                    // Add more password complexity rules if needed (e.g., require numbers, symbols)
                     return null;
                   },
+                  textInputAction: TextInputAction.next,
                 ),
                 const SizedBox(height: 18),
+
                 // Confirm Password Field
                 TextFormField(
                   controller: _confirmPasswordController,
@@ -276,14 +392,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   obscureText: _obscureConfirmPassword,
                   validator: (value) {
-                    if (value == null || value.isEmpty) return 'Please confirm your password';
-                    if (value != _passwordController.text) return 'Passwords do not match';
+                    if (value == null || value.isEmpty) {
+                      return 'Please confirm your password';
+                    }
+                    if (value != _passwordController.text) {
+                      return 'Passwords do not match';
+                    }
                     return null;
                   },
+                  textInputAction: TextInputAction.next, // Change to done if it's the last text field before dropdowns
                 ),
                 const SizedBox(height: 18),
 
-                // --- Use Constant Lists/Maps for Dropdowns with consistent styling ---
+                // --- School/Dept/Course Dropdowns (Visible for everyone) ---
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
                     'School',
@@ -300,10 +421,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       _selectedCourse = null;
                     });
                   },
-                  validator: (value) => value == null ? 'School is required' : null,
+                  validator: (value) => value == null ? 'Please select your school' : null,
                   isExpanded: true, // Ensure dropdown takes full width
                 ),
                 const SizedBox(height: 18),
+
                 // Department Dropdown
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
@@ -312,6 +434,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     prefixIcon: Icon(Icons.business_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   value: _selectedDepartment,
+                  // Disable dropdown if school is not selected
+                  disabledHint: _selectedSchool == null ? const Text('Select school first') : null,
                   items: (_selectedSchool != null && departmentsMap.containsKey(_selectedSchool))
                       ? departmentsMap[_selectedSchool]!.map((String department) {
                           return DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis));
@@ -323,32 +447,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       _selectedCourse = null; // Reset course
                     });
                   },
-                  validator: (value) => _selectedSchool != null && value == null ? 'Department is required' : null,
+                  validator: (value) => _selectedSchool != null && value == null ? 'Please select your department' : null,
                   isExpanded: true,
-                  disabledHint: const Text('Select school first'), // Show hint when disabled
                 ),
                 const SizedBox(height: 18),
+
                 // Course Dropdown
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
                     'Course',
-                     hint: _selectedSchool == null ? 'Select school first' : 'Select your course',
+                     hint: _selectedDepartment == null ? 'Select department first' : 'Select your course',
                      prefixIcon: Icon(Icons.book_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   value: _selectedCourse,
-                  items: (_selectedSchool != null && coursesMap.containsKey(_selectedSchool))
-                      ? coursesMap[_selectedSchool]!.map((String course) {
+                  // Disable dropdown if department is not selected
+                  disabledHint: _selectedDepartment == null ? const Text('Select department first') : null,
+                  items: (_selectedSchool != null && _selectedDepartment != null && coursesMap.containsKey(_selectedSchool)) // Ensure school is selected too
+                      ? coursesMap[_selectedSchool]!.map((String course) { // Using coursesMap linked to SCHOOL as per dropdown_data.dart
                           return DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis));
                         }).toList()
-                      : [], // Empty list if no school selected or no courses
-                  onChanged: (_selectedSchool == null || !coursesMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
+                      : [], // Empty list if prerequisites not met
+                  onChanged: (_selectedSchool == null || _selectedDepartment == null || !coursesMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
                     setState(() {
                       _selectedCourse = newValue;
                     });
                   },
-                  validator: (value) => _selectedSchool != null && value == null ? 'Course is required' : null,
+                  validator: (value) => _selectedDepartment != null && value == null ? 'Please select your course' : null,
                   isExpanded: true,
-                  disabledHint: const Text('Select school first'), // Show hint when disabled
                 ),
                 const SizedBox(height: 30), // Spacing before button
 
@@ -366,6 +491,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           elevation: 3,
                           textStyle: textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
                           ),
                         ),
                         onPressed: _handleRegister, // Call handler
@@ -385,6 +511,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: TextButton.styleFrom(foregroundColor: brandColor), // Brand color text
                   child: const Text("Already have an account? Login here"),
                 ),
+                const SizedBox(height: 20), // Add some bottom padding
               ],
             ),
           ),
@@ -412,16 +539,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
           content: const Text('A verification email has been sent.\nPlease check your inbox (and spam folder) and click the link to verify your account before logging in.'),
           actions: <Widget>[
             TextButton(
+              style: TextButton.styleFrom(foregroundColor: brandColor), // Use brand color for button text
               child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
               onPressed: () {
                 Navigator.of(context).pop(); // Close the dialog
-                // Pop RegisterScreen to go back to LoginScreen
-                if (Navigator.canPop(context)) {
+                // Navigate back to Login Screen after successful registration
+                 if (Navigator.canPop(context)) {
+                   // If RegisterScreen was pushed onto the stack, pop it.
                    Navigator.of(context).pop();
-                } else {
-                   // Fallback if Register was the first screen (unlikely)
+                 } else {
+                   // Otherwise, replace the current screen with LoginScreen.
                    Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
-                }
+                 }
               },
             ),
           ],

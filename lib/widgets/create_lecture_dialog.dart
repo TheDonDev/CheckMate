@@ -1,11 +1,12 @@
 // lib/widgets/create_lecture_dialog.dart
 import 'package:checkmate/constants/dropdown_data.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
-import 'package:checkmate/models/lecture.dart';
+import 'package:checkmate/models/lecture.dart'; // Ensure this uses the updated Lecture model
 import 'package:checkmate/services/api_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+// import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+// Import for kDebugMode
 
 class CreateLectureDialog extends StatefulWidget {
   final app_user.User currentUser;
@@ -48,8 +49,10 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   @override
   void initState() {
     super.initState();
-    // Pre-fill lecturer's school if available from user data (optional, depends on your User model)
-    // _selectedSchool = widget.currentUser.school; // Example if school is part of User model
+    // Pre-fill lecturer's phone if available
+    _lecturerPhoneController.text = widget.currentUser.phoneNumber;
+    // Pre-fill lecturer's school if available (optional)
+    // _selectedSchool = widget.currentUser.school;
     _updateDependentDropdowns(); // Initialize based on potentially pre-selected school
   }
 
@@ -111,11 +114,13 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
   // Method to show the date picker
    Future<void> _pickDate() async {
+    final DateTime now = DateTime.now();
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 1)), // Allow yesterday for flexibility
-      lastDate: DateTime.now().add(const Duration(days: 365)), // Allow up to one year ahead
+      initialDate: _selectedDate ?? now,
+      // Allow selecting today or future dates
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 365)), // Allow up to one year ahead
       helpText: 'Select Lecture Date',
       builder: (context, child) {
         // Apply custom theme to the date picker
@@ -193,9 +198,15 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null) {
          _showValidationError('Please select lecture date, start time, and end time.'); return;
       }
-      // Combine date and time
-      final DateTime startDateTime = DateTime(_selectedDate!.year, _selectedDate!.month, _selectedDate!.day, _selectedStartTime!.hour, _selectedStartTime!.minute);
-      final DateTime endDateTime = DateTime(_selectedDate!.year, _selectedDate!.month, _selectedDate!.day, _selectedEndTime!.hour, _selectedEndTime!.minute);
+      // Combine date and time into DateTime objects
+      final DateTime startDateTime = DateTime(
+          _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
+          _selectedStartTime!.hour, _selectedStartTime!.minute
+      );
+      final DateTime endDateTime = DateTime(
+          _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
+          _selectedEndTime!.hour, _selectedEndTime!.minute
+      );
       // Validate end time is after start time
       if (!endDateTime.isAfter(startDateTime)) {
          _showValidationError('End time must be after start time.'); return;
@@ -204,31 +215,19 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       // Set loading state
       setState(() => _isLoading = true);
 
-      // --- Verification Check ---
-      // NOTE: As requested, we are *not* adding a frontend verification check here.
-      // The check to allow 'muhambe@au.ac.ke' or enforce verification for others
-      // MUST be implemented in your Node.js backend API endpoint for security.
-      // If a frontend check were needed (less secure), it would look like:
-      // if (widget.currentUser.email != 'muhambe@au.ac.ke' && !widget.currentUser.isVerified) {
-      //    _showValidationError('Your account must be verified to create lectures.');
-      //    setState(() => _isLoading = false);
-      //    return;
-      // }
-      // --- End Verification Check Note ---
+      // --- Backend Verification Note ---
+      // The backend API (/lectures POST endpoint) should handle the verification check:
+      // - Allow 'muhambe@au.ac.ke' regardless of verification status.
+      // - For all other users, check if their role is 'lecturer' AND if their 'isVerified' field in Firestore is true.
+      // - If not authorized, the backend should return a 403 Forbidden error.
+      // --- End Backend Verification Note ---
 
-
-      // Validate that all required fields are filled
-      if (_selectedSchool == null || _selectedDepartment == null || _selectedCourse == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
-        _showValidationError('Please fill in all required fields.');
-        return;
-      }
-
-      // Create Lecture object
+      // Create Lecture object using DateTime? types
       final newLecture = Lecture(
-        id: '', // ID will be generated by Firestore
+        id: '', // ID will be generated by backend/Firestore
         lecturerId: widget.currentUser.id,
         lecturerName: widget.currentUser.name,
-        lecturerPhone: _lecturerPhoneController.text.trim(),
+        lecturerPhone: _lecturerPhoneController.text.trim().isEmpty ? null : _lecturerPhoneController.text.trim(), // Pass null if empty
         school: _selectedSchool!,
         department: _selectedDepartment!,
         course: _selectedCourse!,
@@ -236,11 +235,12 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         semester: _selectedSemester!,
         unitName: _unitNameController.text.trim(),
         unitCode: _unitCodeController.text.trim(),
-        lectureDate: _selectedDate!,
-        startTime: Timestamp.fromDate(startDateTime), // Convert to Firestore Timestamp
-        endTime: Timestamp.fromDate(endDateTime),   // Convert to Firestore Timestamp
+        // *** CORRECTED: Pass DateTime objects directly ***
+        lectureDate: _selectedDate, // Pass DateTime?
+        startTime: startDateTime,   // Pass DateTime
+        endTime: endDateTime,     // Pass DateTime
         venue: _selectedVenue!,
-        createdAt: DateTime.now(), // Record creation time
+        createdAt: null, // Let backend/server set the creation timestamp
       );
 
       try {
@@ -250,6 +250,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         Navigator.of(context).pop(true); // Pop dialog with 'true' on success
       } catch (e) {
          if (!mounted) return; // Check mount status after async gap
+         // Show specific error from API if available, otherwise generic message
          _showValidationError('Failed to create lecture: ${e.toString()}');
       } finally {
         // Reset loading state if widget is still mounted
@@ -271,6 +272,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
          content: Text(message),
          backgroundColor: Theme.of(context).colorScheme.error, // Use theme error color
          behavior: SnackBarBehavior.floating, // Consistent behavior
+         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+         margin: const EdgeInsets.all(10),
        ),
      );
   }
@@ -300,12 +303,12 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 ),
                 const SizedBox(height: 15),
 
-                // Lecturer Phone
+                // Lecturer Phone (Pre-filled, optional validation)
                 TextFormField(
                   controller: _lecturerPhoneController,
-                  decoration: _inputDecoration('Your Phone Number', prefixIcon: const Icon(Icons.phone_outlined)),
+                  decoration: _inputDecoration('Your Phone Number', prefixIcon: const Icon(Icons.phone_outlined), isRequired: false), // Not strictly required by backend logic
                   keyboardType: TextInputType.phone,
-                  validator: (value) => (value == null || value.trim().isEmpty) ? 'Phone number is required' : null,
+                  // validator: (value) => (value == null || value.trim().isEmpty) ? 'Phone number is required' : null, // Optional validation
                 ),
                 const SizedBox(height: 12),
 
@@ -332,7 +335,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   items: _currentDepartments.map((String department) => DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis))).toList(),
                   // Disable if no school is selected or no departments available
                   onChanged: _currentDepartments.isEmpty ? null : (String? newValue) {
-                    setState(() { _selectedDepartment = newValue; _selectedCourse = null; });
+                    setState(() { _selectedDepartment = newValue; _selectedCourse = null; }); // Reset course when department changes
                   },
                   validator: (value) => _selectedSchool != null && value == null ? 'Department is required' : null,
                   isExpanded: true,
@@ -341,14 +344,14 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 const SizedBox(height: 12),
 
                 DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Course', hint: _selectedSchool == null ? 'Select school first' : null, prefixIcon: const Icon(Icons.book_outlined)),
+                  decoration: _inputDecoration('Course', hint: _selectedDepartment == null ? 'Select department first' : null, prefixIcon: const Icon(Icons.book_outlined)), // Hint depends on department
                   value: _selectedCourse,
                   items: _currentCourses.map((String course) => DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis))).toList(),
-                  // Disable if no school is selected or no courses available
-                  onChanged: _currentCourses.isEmpty ? null : (String? newValue) { setState(() { _selectedCourse = newValue; }); },
-                  validator: (value) => _selectedSchool != null && value == null ? 'Course is required' : null,
+                  // Disable if no department is selected or no courses available
+                  onChanged: _currentCourses.isEmpty || _selectedDepartment == null ? null : (String? newValue) { setState(() { _selectedCourse = newValue; }); },
+                  validator: (value) => _selectedDepartment != null && value == null ? 'Course is required' : null, // Validate only if department selected
                   isExpanded: true,
-                  disabledHint: const Text('Select school first'),
+                  disabledHint: const Text('Select department first'),
                 ),
                 const SizedBox(height: 12),
 
@@ -390,22 +393,21 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 // --- Date/Time Pickers ---
                 Text("Lecture Schedule *", style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                // Date Picker Tile (using InkWell + InputDecorator for consistent look)
+                // Date Picker Tile
                 InkWell(
                   onTap: _pickDate,
                   borderRadius: BorderRadius.circular(12),
                   child: InputDecorator(
                     decoration: _inputDecoration('Date', prefixIcon: const Icon(Icons.calendar_today_outlined), isRequired: true).copyWith(
-                      hintText: _selectedDate == null ? 'Select Date' : null, // Show hint only if null
+                      hintText: _selectedDate == null ? 'Select Date' : null,
                     ),
-                    // Display formatted date or nothing (let hint show)
                     child: _selectedDate == null
                         ? null
                         : Text(DateFormat.yMMMEd().format(_selectedDate!), style: const TextStyle(fontSize: 16)),
                   ),
                 ),
                 const SizedBox(height: 10),
-                // Time Picker Tiles (Start and End in a Row)
+                // Time Picker Tiles
                  Row(
                    children: [
                      Expanded(
@@ -422,7 +424,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                          ),
                        ),
                      ),
-                     const SizedBox(width: 10), // Spacing between time pickers
+                     const SizedBox(width: 10),
                      Expanded(
                        child: InkWell(
                          onTap: () => _pickTime(false), // Pick end time
@@ -465,20 +467,17 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         ),
         // Create Button (Primary Action)
         ElevatedButton.icon(
-          // Show loading indicator instead of icon when loading
           icon: _isLoading
-              ? Container()
+              ? Container() // Hide icon when loading
               : const Icon(Icons.check_circle_outline, size: 20),
-          // Show loading indicator or text based on loading state
           label: _isLoading
               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('Create Lecture'),
-          // Disable button when loading, otherwise call submit function
           onPressed: _isLoading ? null : _submitForm,
-          style: ElevatedButton.styleFrom( // Apply brand color style
+          style: ElevatedButton.styleFrom(
             backgroundColor: CreateLectureDialog.brandColor,
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), // Pill shape
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           ),
         ),

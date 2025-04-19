@@ -1,20 +1,24 @@
 // c:\Users\Test\FlutterProjects\checkmate\routes\firebaseAttendance.js
 
 const express = require('express');
-const { db, admin } = require('../firebase'); // Assuming firebase.js exports db and admin
+const { db, admin } = require('../firebase'); // Ensure admin is required for FieldValue.serverTimestamp()
 const router = express.Router();
-const checkAuth = require('../middleware/checkAuth'); // <--- Make sure this path is correct
+const checkAuth = require('../middleware/checkAuth'); // Ensure this path is correct
 
-// --- Constants for Collection Names (Good Practice) ---
-const ATTENDANCE_COLLECTION = 'Attendance'; // Use your actual collection name
-const USERS_COLLECTION = 'users';           // Use your actual users collection name
-const LECTURES_COLLECTION = 'lectures';     // Use your actual lectures collection name
+// --- Constants for Collection Names (Standardized to lowercase) ---
+const ATTENDANCE_COLLECTION = 'attendance'; // Standardized
+const USERS_COLLECTION = 'users';
+const LECTURES_COLLECTION = 'lectures';
 
-// --- Helper Function for Timestamp Conversion ---
+// --- Helper Function for Timestamp Conversion (Firestore -> Client ISO String) ---
 const formatTimestamp = (timestamp) => {
-  // Check if it's a Firestore Timestamp object and has the toDate method
+  // Check if it's a Firestore Timestamp object
   if (timestamp && typeof timestamp.toDate === 'function') {
     return timestamp.toDate().toISOString();
+  }
+  // Check if it's already a JS Date object (might happen in some cases)
+  if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
+    return timestamp.toISOString();
   }
   // If it's already null, undefined, or some other type, return null
   return null;
@@ -22,7 +26,8 @@ const formatTimestamp = (timestamp) => {
 
 
 // --- Student joins a lecture ---
-// Apply checkAuth middleware to ensure user is logged in
+// Endpoint: POST /api/attendance/join/:lectureId (Assuming '/api/attendance' is the base path in your server setup)
+// Requires authentication (checkAuth middleware)
 router.post('/join/:lectureId', checkAuth, async (req, res) => {
   try {
     const lectureId = req.params.lectureId;
@@ -35,6 +40,7 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
         console.log(`Join attempt failed: Lecture not found with ID: ${lectureId}`);
         return res.status(404).json({ error: 'Lecture not found.' });
     }
+    const lectureData = lectureDoc.data(); // Get lecture data for potential validation
 
     // --- Fetch Student Details (including registrationNumber and name) from Firestore ---
     const studentUserRef = db.collection(USERS_COLLECTION).doc(studentUserId);
@@ -42,9 +48,8 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
 
     if (!studentUserDoc.exists) {
         console.error(`Join attempt failed: User document not found for authenticated user ID: ${studentUserId}`);
-        return res.status(404).json({ error: 'Authenticated user profile not found.' });
+        return res.status(404).json({ error: 'Your user profile could not be found.' });
     }
-
     const studentData = studentUserDoc.data();
 
     // --- Authorization & Validation ---
@@ -57,11 +62,22 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
     const registrationNumber = studentData.registrationNumber;
     if (!registrationNumber) {
         console.log(`Join attempt failed: Student ${studentUserId} does not have a registration number in their profile.`);
-        // Match the frontend error handling requirement
-        return res.status(400).json({ error: 'User profile is missing the registration number. Cannot join lecture.' });
+        return res.status(400).json({ error: 'Your profile is missing the registration number. Cannot join lecture.' });
     }
     // Use name from profile, provide a default if missing
     const studentName = studentData.name || 'N/A';
+
+    // --- Optional: Validate if student's profile matches lecture criteria ---
+    // This adds an extra layer of validation if needed
+    if (studentData.school !== lectureData.school ||
+        studentData.department !== lectureData.department ||
+        studentData.course !== lectureData.course ||
+        studentData.yearOfStudy !== lectureData.yearOfStudy ||
+        studentData.semester !== lectureData.semester) {
+        console.warn(`Join attempt warning: Student ${studentUserId} profile details do not fully match lecture ${lectureId} criteria. Allowing join anyway.`);
+        // Decide whether to block (403) or just warn based on requirements
+        // return res.status(403).json({ error: 'Your profile details do not match this lecture.' });
+    }
 
     // --- Check if already joined this specific lecture ---
     const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
@@ -102,12 +118,16 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
     const docRef = await attendanceRef.add(attendanceData);
     console.log(`Student ${studentUserId} (${registrationNumber}) successfully joined lecture ${lectureId}. Record ID: ${docRef.id}`);
 
-    // Return the created record with approximated timestamp for immediate use
+    // Fetch the created doc to return accurate data including server timestamp
+    const createdDoc = await docRef.get();
+    const createdData = createdDoc.data();
+
     res.status(201).json({
-        id: docRef.id,
-        ...attendanceData,
-        joinedAt: new Date().toISOString(), // Return current time as approximation
-        checkInTime: null, // Explicitly null
+        id: createdDoc.id,
+        ...createdData,
+        // Format timestamps for client consistency
+        joinedAt: formatTimestamp(createdData.joinedAt),
+        checkInTime: formatTimestamp(createdData.checkInTime), // Will be null here
      });
 
   } catch (error) {
@@ -115,26 +135,29 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
     console.error('Error Stack:', error.stack);
     res.status(500).json({
         error: 'Internal Server Error: Failed to join lecture',
-        // Provide more detail only in non-production environments
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
 });
 
 // --- Lecturer checks in a student ---
-// Apply checkAuth middleware
+// Endpoint: POST /api/attendance/checkin
+// Requires authentication (checkAuth middleware)
 router.post('/checkin', checkAuth, async (req, res) => {
   try {
     const lecturerUserId = req.userData.userId; // Get lecturer ID from token
 
     // --- Get registrationNumber AND lectureId from request body ---
-    // LectureId is crucial to identify the correct attendance record
     const { registrationNumber, lectureId } = req.body;
 
     // --- Validate Input ---
-    if (!registrationNumber || !lectureId) {
-      console.log(`Check-in failed: Missing registrationNumber or lectureId in request body.`);
-      return res.status(400).json({ error: 'Both registrationNumber and lectureId are required in the request body.' });
+    if (!registrationNumber || typeof registrationNumber !== 'string' || registrationNumber.trim() === '') {
+      console.log(`Check-in failed: Missing or invalid registrationNumber in request body.`);
+      return res.status(400).json({ error: 'Student Registration Number is required.' });
+    }
+    if (!lectureId || typeof lectureId !== 'string' || lectureId.trim() === '') {
+      console.log(`Check-in failed: Missing or invalid lectureId in request body.`);
+      return res.status(400).json({ error: 'Lecture ID is required.' });
     }
 
     // --- Verify Lecturer Role ---
@@ -145,50 +168,49 @@ router.post('/checkin', checkAuth, async (req, res) => {
         return res.status(403).json({ error: 'Forbidden: Only lecturers can check students in.' });
     }
 
-    // --- Optional but Recommended: Verify this lecturer is associated with the lecture ---
-    const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
+    // --- Verify the Lecture Exists ---
+    const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId.trim());
     const lectureDoc = await lectureRef.get();
     if (!lectureDoc.exists) {
-        console.log(`Check-in failed: Lecture ${lectureId} not found.`);
+        console.log(`Check-in failed: Lecture ${lectureId.trim()} not found.`);
         return res.status(404).json({ error: 'Lecture not found.' });
     }
+
+    // --- Optional: Verify this lecturer is associated with the lecture ---
     // Decide on strictness: Allow any lecturer or only the assigned one?
     // if (lectureDoc.data().lecturerId !== lecturerUserId) {
-    //     console.log(`Check-in failed: Lecturer ${lecturerUserId} is not the assigned lecturer for lecture ${lectureId}.`);
+    //     console.log(`Check-in failed: Lecturer ${lecturerUserId} is not the assigned lecturer for lecture ${lectureId.trim()}.`);
     //     return res.status(403).json({ error: 'Forbidden: You are not the lecturer for this session.' });
     // }
     // For now, allow any lecturer but log if it's not the assigned one
     if (lectureDoc.data().lecturerId !== lecturerUserId) {
-         console.warn(`Check-in allowed: Lecturer ${lecturerUserId} checking in for lecture ${lectureId} taught by ${lectureDoc.data().lecturerId}.`);
+         console.warn(`Check-in allowed: Lecturer ${lecturerUserId} checking in for lecture ${lectureId.trim()} taught by ${lectureDoc.data().lecturerId}.`);
     }
 
     // --- Find the specific attendance record using BOTH registrationNumber and lectureId ---
     const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
     const querySnapshot = await attendanceRef
-      .where('registrationNumber', '==', registrationNumber)
-      .where('lectureId', '==', lectureId) // Ensure we target the correct lecture
+      .where('registrationNumber', '==', registrationNumber.trim()) // Use trimmed value
+      .where('lectureId', '==', lectureId.trim()) // Use trimmed value
       .limit(1) // Should only be one record per student per lecture
       .get();
 
     if (querySnapshot.empty) {
-      console.log(`Check-in failed: No attendance record found for registration number ${registrationNumber} in lecture ${lectureId}. Student might not have joined.`);
-      // Provide a more specific error message
+      console.log(`Check-in failed: No attendance record found for registration number ${registrationNumber.trim()} in lecture ${lectureId.trim()}. Student might not have joined.`);
       return res.status(404).json({ error: 'Student with this registration number has not joined this specific lecture session.' });
     }
 
-    // There should be only one document due to the limit(1) and query constraints
-    const attendanceDoc = querySnapshot.docs[0];
-    const attendanceData = attendanceDoc.data();
+    // Get the document reference and data
+    const attendanceDocRef = querySnapshot.docs[0].ref;
+    const attendanceData = querySnapshot.docs[0].data();
 
     // --- Check if already checked in ---
     if (attendanceData.checkedIn === true) {
-        console.log(`Check-in skipped: Student ${registrationNumber} already checked into lecture ${lectureId}.`);
-        // Return current data with a specific message
+        console.log(`Check-in skipped: Student ${registrationNumber.trim()} already checked into lecture ${lectureId.trim()}.`);
         return res.status(200).json({
             message: 'Student already checked in.',
-            id: attendanceDoc.id,
+            id: querySnapshot.docs[0].id,
             ...attendanceData,
-            // Ensure timestamps are formatted for client
             checkInTime: formatTimestamp(attendanceData.checkInTime),
             joinedAt: formatTimestamp(attendanceData.joinedAt),
         });
@@ -196,29 +218,27 @@ router.post('/checkin', checkAuth, async (req, res) => {
 
     // --- Update the attendance record ---
     const checkInTimestamp = admin.firestore.FieldValue.serverTimestamp();
-    await attendanceDoc.ref.update({
+    await attendanceDocRef.update({
       checkInTime: checkInTimestamp,
-      checkedIn: true, // Use standardized field name
+      checkedIn: true,
       checkedInBy: lecturerUserId, // Record who checked them in
     });
 
-    console.log(`Check-in successful: Student ${registrationNumber} checked into lecture ${lectureId} by lecturer ${lecturerUserId}.`);
+    console.log(`Check-in successful: Student ${registrationNumber.trim()} checked into lecture ${lectureId.trim()} by lecturer ${lecturerUserId}.`);
 
-    // --- Return success message with student details (as requested by frontend) ---
+    // Fetch the updated data to return
+    const updatedDoc = await attendanceDocRef.get();
+    const updatedData = updatedDoc.data();
+
+    // --- Return success message with student details ---
     res.json({
-        // Use studentName from the record we found
-        message: `Student ${attendanceData.studentName || 'N/A'} (${registrationNumber}) checked in successfully.`,
-        // Optionally return the updated record data, formatted correctly
+        message: `Student ${updatedData.studentName || 'N/A'} (${updatedData.registrationNumber}) checked in successfully.`,
         checkedInData: {
-            id: attendanceDoc.id,
-            lectureId: attendanceData.lectureId,
-            userId: attendanceData.userId,
-            registrationNumber: attendanceData.registrationNumber,
-            studentName: attendanceData.studentName,
-            checkedIn: true,
-            checkInTime: new Date().toISOString(), // Return current time as approximation
-            checkedInBy: lecturerUserId,
-            joinedAt: formatTimestamp(attendanceData.joinedAt),
+            id: updatedDoc.id,
+            ...updatedData,
+            // Format timestamps for client
+            checkInTime: formatTimestamp(updatedData.checkInTime),
+            joinedAt: formatTimestamp(updatedData.joinedAt),
         }
     });
 
@@ -233,7 +253,8 @@ router.post('/checkin', checkAuth, async (req, res) => {
 });
 
 // --- Student views their attendance history ---
-// Apply checkAuth middleware
+// Endpoint: GET /api/attendance/student/:userId
+// Requires authentication (checkAuth middleware)
 router.get('/student/:userId', checkAuth, async (req, res) => {
   try {
     const requestedUserId = req.params.userId;
@@ -245,9 +266,10 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
         return res.status(403).json({ error: 'Forbidden: You can only access your own attendance records.' });
     }
 
-    // --- Fetch Attendance Records ---
+    // --- Fetch Attendance Records for the student ---
     const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
-    const snapshot = await attendanceRef.where('userId', '==', requestedUserId).get();
+    // Consider ordering if needed, e.g., by joinedAt descending
+    const snapshot = await attendanceRef.where('userId', '==', requestedUserId).orderBy('joinedAt', 'desc').get();
 
     const attendanceRecords = [];
     snapshot.forEach((doc) => {
@@ -258,14 +280,13 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
           // Convert Timestamps for client consistency
           checkInTime: formatTimestamp(data.checkInTime),
           joinedAt: formatTimestamp(data.joinedAt),
-          // Ensure consistent field name and boolean value
-          checkedIn: data.checkedIn || false,
+          checkedIn: data.checkedIn || false, // Ensure boolean value
        });
     });
 
     // --- Percentage Calculation ---
     let percentage = 0;
-    let totalLectures = 0;
+    let totalRelevantLectures = 0;
     let attendedLecturesCount = attendanceRecords.filter((record) => record.checkedIn === true).length;
 
     try {
@@ -273,36 +294,45 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
         const userDoc = await db.collection(USERS_COLLECTION).doc(requestedUserId).get();
         if (userDoc.exists) {
             const userData = userDoc.data();
-            // **IMPORTANT**: Adjust these field names to EXACTLY match your 'users' and 'lectures' collections
-            const { school, department, course, yearOfStudy, semester } = userData; // Example field names
+            // **IMPORTANT**: Ensure these field names EXACTLY match your 'users' and 'lectures' collections
+            const { school, department, course, yearOfStudy, semester } = userData;
 
             // Check if all necessary fields are present for the query
             if (school && department && course && yearOfStudy && semester) {
                 const lecturesRef = db.collection(LECTURES_COLLECTION);
-                // This query likely requires a composite index in Firestore.
-                // Check Firestore console -> Indexes if this query fails or is slow.
-                const lecturesSnapshot = await lecturesRef
-                    .where('school', '==', school) // Adjust field name if needed
-                    .where('department', '==', department) // Adjust field name if needed
-                    .where('course', '==', course) // Adjust field name if needed
-                    .where('yearOfStudy', '==', yearOfStudy) // Adjust field name if needed (e.g., 'year')
-                    .where('semester', '==', semester) // Adjust field name if needed
-                    .get();
+                // This query requires a composite index in Firestore.
+                // Example Index: lectures | school ASC | department ASC | course ASC | yearOfStudy ASC | semester ASC | startTime ASC (or DESC)
+                let lecturesQuery = lecturesRef
+                    .where('school', '==', school)
+                    .where('department', '==', department)
+                    .where('course', '==', course)
+                    .where('yearOfStudy', '==', yearOfStudy)
+                    .where('semester', '==', semester);
 
-                totalLectures = lecturesSnapshot.size;
-                percentage = totalLectures > 0 ? (attendedLecturesCount / totalLectures) * 100 : 0;
-                console.log(`Attendance calculation for ${requestedUserId}: Attended ${attendedLecturesCount} / Total ${totalLectures} relevant lectures.`);
+                // Optional: Only count lectures that have already passed?
+                // lecturesQuery = lecturesQuery.where('startTime', '<=', new Date());
+
+                const lecturesSnapshot = await lecturesQuery.get();
+
+                totalRelevantLectures = lecturesSnapshot.size;
+                percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
+                console.log(`Attendance calculation for ${requestedUserId}: Attended ${attendedLecturesCount} / Total ${totalRelevantLectures} relevant lectures.`);
             } else {
-                 console.warn(`Cannot calculate percentage for user ${requestedUserId}: Missing profile details (school/dept/course/year/semester). Using attended count only.`);
-                 // Fallback: maybe calculate based only on lectures they *joined*? Less accurate.
-                 // totalLectures = attendanceRecords.length; // Alternative, less accurate total
-                 // percentage = totalLectures > 0 ? (attendedLecturesCount / totalLectures) * 100 : 0;
+                 console.warn(`Cannot calculate percentage for user ${requestedUserId}: Missing profile details (school/dept/course/year/semester).`);
+                 // Decide how to handle this - percentage remains 0, or calculate based on joined lectures?
+                 // totalRelevantLectures = attendanceRecords.length; // Less accurate alternative
+                 // percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
             }
         } else {
              console.warn(`Cannot calculate percentage for user ${requestedUserId}: User document not found.`);
         }
     } catch (calcError) {
         console.error(`Error calculating attendance percentage for user ${requestedUserId}:`, calcError);
+        // Check specifically for Firestore index errors during percentage calculation
+        if (calcError.code === 'failed-precondition' || (calcError.message && calcError.message.includes('index'))) {
+             console.error("Firestore Index Missing for Percentage Calculation: The query requires an index. Check the error details for a link to create it in the Firebase console.");
+             // Inform the client or just proceed without percentage?
+        }
         // Proceed without percentage if calculation fails, don't crash the request
     }
     // --- End Percentage Calculation ---
@@ -310,7 +340,7 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
     const data = {
       attendanceRecords, // Contains registrationNumber, studentName etc. from when they joined
       percentage: percentage.toFixed(2), // Format to 2 decimal places
-      totalLectures: totalLectures, // Total relevant lectures found (can be 0)
+      totalLectures: totalRelevantLectures, // Total relevant lectures found (can be 0)
       attendedLectures: attendedLecturesCount, // Number of checked-in records found
     };
     res.json(data);
@@ -326,7 +356,8 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
 });
 
 //--- Lecturer view student attendance for a particular lecture ---
-// Apply checkAuth middleware
+// Endpoint: GET /api/attendance/lecture/:lectureId
+// Requires authentication (checkAuth middleware)
 router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
   try {
     const lectureId = req.params.lectureId;
@@ -340,14 +371,14 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
         return res.status(403).json({ error: 'Forbidden: Only lecturers can view lecture attendance.' });
     }
 
-    // --- Optional but Recommended: Verify the lecture exists and maybe if this lecturer owns it ---
+    // --- Verify the lecture exists ---
     const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
     const lectureDoc = await lectureRef.get();
     if (!lectureDoc.exists) {
         console.log(`Attendance view failed: Lecture ${lectureId} not found.`);
         return res.status(404).json({ error: 'Lecture not found.' });
     }
-    // Allow any lecturer to view for now, but could restrict here:
+    // --- Optional: Verify this lecturer owns the lecture ---
     // if (lectureDoc.data().lecturerId !== lecturerUserId) {
     //     console.log(`Attendance view failed: Lecturer ${lecturerUserId} is not the assigned lecturer for lecture ${lectureId}.`);
     //     return res.status(403).json({ error: 'Forbidden: You can only view attendance for your own lectures.' });
@@ -355,33 +386,39 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
 
     // --- Fetch Attendance Records for the specific lecture ---
     const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
-    const snapshot = await attendanceRef.where('lectureId', '==', lectureId).get();
+    // Consider ordering results, e.g., by student name or registration number
+    const snapshot = await attendanceRef.where('lectureId', '==', lectureId).orderBy('studentName', 'asc').get();
 
     const attendanceRecords = [];
     snapshot.forEach((doc) => {
       const data = doc.data();
-      // Ensure all necessary fields are included, matching frontend needs
       attendanceRecords.push({
         id: doc.id,
-        registrationNumber: data.registrationNumber || 'N/A', // Default if missing
-        studentName: data.studentName || 'N/A',             // Default if missing
+        registrationNumber: data.registrationNumber || 'N/A',
+        studentName: data.studentName || 'N/A',
         lectureId: data.lectureId,
         userId: data.userId,
-        checkedIn: data.checkedIn || false, // Standardized name, default false
-        // Convert Timestamps for client consistency
+        checkedIn: data.checkedIn || false,
         checkInTime: formatTimestamp(data.checkInTime),
         joinedAt: formatTimestamp(data.joinedAt),
-        checkedInBy: data.checkedInBy || null, // Include who checked them in
+        checkedInBy: data.checkedInBy || null,
       });
     });
 
     console.log(`Fetched ${attendanceRecords.length} attendance records for lecture ${lectureId} by request from lecturer ${lecturerUserId}.`);
-    // Return the array of records (frontend will handle sorting)
-    res.json(attendanceRecords);
+    res.json(attendanceRecords); // Return the array of records
 
   } catch (error) {
     console.error(`Error getting lecture attendance for lecture ${req.params.lectureId}:`, error);
     console.error('Error Stack:', error.stack);
+    // Check specifically for Firestore index errors if ordering was added
+    if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
+        console.error("Firestore Index Missing: The query requires an index (likely on lectureId and studentName). Check the error details for a link to create it.");
+        return res.status(500).json({
+            error: 'Internal Server Error: Failed to get lecture attendance due to missing database index.',
+            details: 'A required Firestore index is missing.'
+        });
+    }
     res.status(500).json({
         error: 'Internal Server Error: Failed to get lecture attendance',
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined

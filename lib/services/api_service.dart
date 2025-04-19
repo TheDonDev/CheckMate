@@ -4,7 +4,7 @@ import 'dart:io'; // Only needed for HttpStatus and Platform checks
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/models/lecture.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // Import FirebaseAuth
-import 'package:flutter/foundation.dart' show kIsWeb; // Import kIsWeb constant
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode; // Import kIsWeb/kDebugMode
 import 'package:http/http.dart' as http;
 
 // Define Custom Exceptions for better error handling
@@ -39,7 +39,7 @@ class ApiService {
       // _baseUrl = _firebaseFunctionsUrl;
       // Placeholder if not set:
       _baseUrl = 'https://us-central1-checkmate-app-8489a.cloudfunctions.net/api'; // Example
-      print("ApiService using Firebase Functions URL: $_baseUrl");
+      if (kDebugMode) print("ApiService using Firebase Functions URL: $_baseUrl");
     } else {
       // Determine URL for local/self-hosted backend
       if (kIsWeb) {
@@ -62,11 +62,11 @@ class ApiService {
           }
         } catch (e) {
           // Fallback if Platform check fails unexpectedly
-          print("Platform check failed, defaulting to local IP: $e");
+          if (kDebugMode) print("Platform check failed, defaulting to local IP: $e");
           _baseUrl = 'http://$_localIp:$_port/api/firebase'; // Adjust path if needed
         }
       }
-      print("ApiService using Local/Self-Hosted URL: $_baseUrl");
+      if (kDebugMode) print("ApiService using Local/Self-Hosted URL: $_baseUrl");
     }
   }
   // --- End Base URL Determination ---
@@ -87,20 +87,21 @@ class ApiService {
         final idToken = await user.getIdToken(false);
         if (idToken != null) {
           headers['Authorization'] = 'Bearer $idToken'; // Standard Bearer token format
-           print("Auth Token included in headers."); // Debug log
+           if (kDebugMode) print("Auth Token included in headers."); // Debug log
         } else {
-           print("Warning: Could not get ID token for authenticated user.");
+           if (kDebugMode) print("Warning: Could not get ID token for authenticated user.");
            // Depending on API requirements, might need to throw here
            // throw ApiException("Authentication token unavailable.", statusCode: 401);
         }
       } catch (e) {
-         print("Error getting ID token: $e");
+         if (kDebugMode) print("Error getting ID token: $e");
          // Throw an exception that can be caught and shown to the user
          throw ApiException("Failed to retrieve authentication token. Please try logging in again.", statusCode: 401);
       }
     } else {
-       print("Warning: No authenticated user found for API request.");
+       if (kDebugMode) print("Warning: No authenticated user found for API request.");
        // Throw an exception if authentication is strictly required for this endpoint
+       // Example: For endpoints other than login/signup
        // throw ApiException("User not authenticated. Please log in.", statusCode: 401);
     }
     return headers;
@@ -111,7 +112,7 @@ class ApiService {
   dynamic _handleResponse(http.Response response) {
     final String responseBody = response.body;
     // Log request details and response status/body (truncated)
-    print("API Response (${response.statusCode}) to ${response.request?.method} ${response.request?.url}: ${responseBody.length > 500 ? '${responseBody.substring(0, 500)}...' : responseBody}");
+    if (kDebugMode) print("API Response (${response.statusCode}) to ${response.request?.method} ${response.request?.url}: ${responseBody.length > 500 ? '${responseBody.substring(0, 500)}...' : responseBody}");
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       // Success range (2xx)
@@ -123,7 +124,7 @@ class ApiService {
         // Decode JSON for other successful responses
         return jsonDecode(responseBody);
       } catch (e) {
-        print("API Success Response JSON Decode Error: $e");
+        if (kDebugMode) print("API Success Response JSON Decode Error: $e");
         // Throw specific exception for parsing failure on success
         throw ApiException('Failed to parse successful response from server.', statusCode: response.statusCode);
       }
@@ -148,7 +149,7 @@ class ApiService {
          // If body isn't valid JSON, use the raw body or status code
          errorMessage = responseBody.isNotEmpty ? responseBody : 'HTTP Error $statusCode';
       }
-      print("API Error ($statusCode): $errorMessage");
+      if (kDebugMode) print("API Error ($statusCode): $errorMessage");
       // Throw custom exception with message and status code
       throw ApiException(errorMessage, statusCode: statusCode);
     }
@@ -161,7 +162,7 @@ class ApiService {
   Future<List<Lecture>> getLecturesForLecturer(String lecturerId) async {
     // Endpoint assumes backend route is /lectures/lecturer/{lecturerId}
     final uri = Uri.parse('$_baseUrl/lectures/lecturer/$lecturerId');
-    print("API Request: GET $uri");
+    if (kDebugMode) print("API Request: GET $uri");
     try {
       final response = await http.get(
         uri,
@@ -171,7 +172,7 @@ class ApiService {
       // Map the JSON list to a list of Lecture objects
       return data.map((item) => Lecture.fromApiJson(item as Map<String, dynamic>)).toList();
     } catch (e) {
-        print("Error in getLecturesForLecturer: $e");
+        if (kDebugMode) print("Error in getLecturesForLecturer: $e");
         if (e is ApiException) rethrow; // Rethrow specific API exceptions
         throw ApiException("Failed to fetch lecturer's lectures: ${e.toString()}"); // Wrap other errors
     }
@@ -191,14 +192,14 @@ class ApiService {
 
     // Validate required filters (Year and Semester are crucial for student view)
     if (year == null || year.isEmpty || semester == null || semester.isEmpty) {
-        print("API Error: Year and Semester filters are required for student lectures.");
+        if (kDebugMode) print("API Error: Year and Semester filters are required for student lectures.");
         // Throw an exception to be caught by the UI
         throw ApiException("Year and Semester must be selected to find lectures.");
     }
 
     // Endpoint assumes backend route is /lectures/student with query params
     final uri = Uri.parse('$_baseUrl/lectures/student').replace(queryParameters: queryParams);
-    print("API Request: GET $uri");
+    if (kDebugMode) print("API Request: GET $uri");
     try {
       final response = await http.get(
         uri,
@@ -207,7 +208,7 @@ class ApiService {
       final List<dynamic> data = _handleResponse(response);
       return data.map((item) => Lecture.fromApiJson(item as Map<String, dynamic>)).toList();
     } catch (e) {
-        print("Error in getStudentLectures: $e");
+        if (kDebugMode) print("Error in getStudentLectures: $e");
         if (e is ApiException) rethrow;
         throw ApiException("Failed to fetch student lectures: ${e.toString()}");
     }
@@ -219,7 +220,7 @@ class ApiService {
     final uri = Uri.parse('$_baseUrl/lectures');
     // Use the lecture model's toApiJson method for the request body
     final requestBody = jsonEncode(lecture.toApiJson());
-    print("API Request: POST $uri with body: $requestBody");
+    if (kDebugMode) print("API Request: POST $uri with body: $requestBody");
     try {
       final response = await http.post(
         uri,
@@ -230,7 +231,7 @@ class ApiService {
       // Expect the created lecture object back from the API
       return Lecture.fromApiJson(data);
     } catch (e) {
-        print("Error in createLecture: $e");
+        if (kDebugMode) print("Error in createLecture: $e");
         if (e is ApiException) rethrow;
         throw ApiException("Failed to create lecture: ${e.toString()}");
     }
@@ -238,45 +239,39 @@ class ApiService {
 
   // --- Attendance API Methods ---
 
-  /// Allows a student to join a lecture using their registration number.
-  /// The backend should verify the authenticated user matches the registration number owner.
-  Future<AttendanceRecord> joinLecture(String lectureId, String userId, String registrationNumber) async {
-    // Endpoint assumes backend route is POST /attendance/join
-    // The backend should ideally get the student ID from the auth token.
-    // Sending registrationNumber in the body allows the backend to create the record.
-    final uri = Uri.parse('$_baseUrl/attendance/join');
-    final requestBody = jsonEncode({
-        'lectureId': lectureId,
-        // 'studentId': userId, // Send studentId if backend doesn't use token reliably
-        'registrationNumber': registrationNumber, // Send the registration number
-      });
-     print("API Request: POST $uri with body: $requestBody");
+  /// Allows a student to join a lecture.
+  /// Backend uses the auth token to get studentId and profile details.
+  Future<AttendanceRecord> joinLecture(String lectureId) async {
+    // Endpoint assumes backend route is POST /attendance/join/:lectureId
+    // No request body needed as backend uses token and path param
+    final uri = Uri.parse('$_baseUrl/attendance/join/$lectureId');
+    if (kDebugMode) print("API Request: POST $uri");
     try {
       final response = await http.post(
         uri,
-        headers: await _getHeaders(), // Auth needed (student must be logged in)
-        body: requestBody,
+        headers: await _getHeaders(includeContentType: false), // Auth needed (student must be logged in), no body
       );
       final Map<String, dynamic> data = _handleResponse(response);
       // Expect the created/updated attendance record back
       return AttendanceRecord.fromApiJson(data);
     } catch (e) {
-        print("Error in joinLecture: $e");
+        if (kDebugMode) print("Error in joinLecture: $e");
         if (e is ApiException) rethrow;
         throw ApiException("Failed to join lecture: ${e.toString()}");
     }
   }
 
   /// Allows a lecturer to check in a student using their registration number.
-  Future<AttendanceRecord> checkInStudent(String lectureId, String registrationNumber, String lecturerId) async {
+  // *** CORRECTED SIGNATURE: Removed lecturerId parameter ***
+  Future<AttendanceRecord> checkInStudent(String lectureId, String registrationNumber) async {
     // Endpoint assumes backend route is POST /attendance/checkin
     final uri = Uri.parse('$_baseUrl/attendance/checkin');
     final requestBody = jsonEncode({
         'lectureId': lectureId,
         'registrationNumber': registrationNumber, // Use registration number for lookup
-        // 'lecturerId': lecturerId // Send lecturerId if backend doesn't use token reliably
+        // 'lecturerId' is NOT sent; backend uses auth token
       });
-    print("API Request: POST $uri with body: $requestBody");
+    if (kDebugMode) print("API Request: POST $uri with body: $requestBody");
     try {
       final response = await http.post(
         uri,
@@ -287,7 +282,7 @@ class ApiService {
       // Expect the updated attendance record back
       return AttendanceRecord.fromApiJson(data);
     } catch (e) {
-        print("Error in checkInStudent: $e");
+        if (kDebugMode) print("Error in checkInStudent: $e");
         // Provide more specific feedback based on potential API error messages
         if (e is ApiException) {
             if (e.statusCode == 404) { // Example: If backend returns 404 for not found/not joined
@@ -295,6 +290,7 @@ class ApiService {
             } else if (e.statusCode == 409) { // Example: If backend returns 409 for already checked in
                  throw ApiException('Check-in failed: Student $registrationNumber is already checked in.', statusCode: e.statusCode);
             }
+            // Add more specific status code handling if needed (e.g., 403 Forbidden)
             rethrow; // Rethrow other API exceptions
         }
         // Wrap generic errors
@@ -306,7 +302,7 @@ class ApiService {
   Future<List<AttendanceRecord>> getLectureAttendance(String lectureId) async {
     // Endpoint assumes backend route is GET /attendance/lecture/{lectureId}
     final uri = Uri.parse('$_baseUrl/attendance/lecture/$lectureId');
-    print("API Request: GET $uri");
+    if (kDebugMode) print("API Request: GET $uri");
     try {
       final response = await http.get(
         uri,
@@ -316,30 +312,53 @@ class ApiService {
       // Map JSON list to AttendanceRecord list
       return data.map((item) => AttendanceRecord.fromApiJson(item as Map<String, dynamic>)).toList();
     } catch (e) {
-        print("Error in getLectureAttendance: $e");
+        if (kDebugMode) print("Error in getLectureAttendance: $e");
         if (e is ApiException) rethrow;
         throw ApiException("Failed to fetch lecture attendance: ${e.toString()}");
     }
   }
 
-  // --- Optional: Student Attendance Summary  ---
-  
+  // --- Student Attendance Summary ---
+  /// Fetches the student's attendance summary (records, percentage, counts).
+  /// Backend calculates percentage based on relevant lectures for the student.
   Future<Map<String, dynamic>> getStudentAttendanceSummary(String userId) async {
     // Endpoint assumes backend route is GET /attendance/student/{userId}
     final uri = Uri.parse('$_baseUrl/attendance/student/$userId');
-    print("API Request: GET $uri");
+    if (kDebugMode) print("API Request: GET $uri");
     try {
       final response = await http.get(
         uri,
         headers: await _getHeaders(includeContentType: false), // Auth needed
         );
-      // Expects a map, e.g., {'totalJoined': 10, 'totalCheckedIn': 8}
-      return _handleResponse(response);
+      // Expects a map like:
+      // {
+      //   "attendanceRecords": [...],
+      //   "percentage": "80.00",
+      //   "totalLectures": 10,
+      //   "attendedLectures": 8
+      // }
+      final Map<String, dynamic> data = _handleResponse(response);
+
+      // Parse the nested attendance records list
+      if (data['attendanceRecords'] is List) {
+         data['attendanceRecords'] = (data['attendanceRecords'] as List)
+            .map((item) => AttendanceRecord.fromApiJson(item as Map<String, dynamic>))
+            .toList();
+      } else {
+         // Handle case where attendanceRecords might be missing or not a list
+         data['attendanceRecords'] = <AttendanceRecord>[];
+      }
+      // Ensure other fields exist, provide defaults if necessary
+      data['percentage'] = data['percentage']?.toString() ?? '0.00';
+      data['totalLectures'] = data['totalLectures'] as int? ?? 0;
+      data['attendedLectures'] = data['attendedLectures'] as int? ?? 0;
+
+      return data;
     } catch (e) {
-        print("Error in getStudentAttendanceSummary: $e");
+        if (kDebugMode) print("Error in getStudentAttendanceSummary: $e");
         if (e is ApiException) rethrow;
         throw ApiException("Failed to fetch student attendance summary: ${e.toString()}");
     }
   }
-  
+
 }

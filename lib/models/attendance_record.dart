@@ -1,20 +1,31 @@
 // lib/models/attendance_record.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart'; // For immutable annotation
 import 'package:intl/intl.dart'; // For formatting dates/times in UI if needed
 
 // Helper function to parse Timestamps from various formats (API/Firestore)
 Timestamp? _parseTimestamp(dynamic timestampData) {
   if (timestampData == null) return null;
-  if (timestampData is Timestamp) return timestampData; // Already a Timestamp
+  if (timestampData is Timestamp) return timestampData;
   if (timestampData is String) {
-    try { return Timestamp.fromDate(DateTime.parse(timestampData).toUtc()); } // Assume ISO 8601 UTC string from API
-    catch (e) { print("Error parsing timestamp string: $timestampData, Error: $e"); return null; }
+    try {
+      // Try parsing as ISO 8601 string
+      return Timestamp.fromDate(DateTime.parse(timestampData).toUtc());
+    } catch (e) {
+      print("Error parsing timestamp string: $timestampData, Error: $e");
+      return null;
+    }
   } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
     // Firestore-like map { _seconds: ..., _nanoseconds: ... }
     return Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
   } else if (timestampData is int) {
     // Assuming milliseconds since epoch if it's an int
-    return Timestamp.fromMillisecondsSinceEpoch(timestampData);
+    try {
+      return Timestamp.fromMillisecondsSinceEpoch(timestampData);
+    } catch (e) {
+       print("Error parsing timestamp int: $timestampData, Error: $e");
+       return null;
+    }
   }
   print("Unrecognized timestamp format: $timestampData");
   return null;
@@ -30,98 +41,95 @@ String? _toIso8601String(dynamic dateOrTimestamp) {
   return dateTime.toUtc().toIso8601String(); // Use UTC for consistency
 }
 
-
+@immutable // Mark class as immutable
 class AttendanceRecord {
   final String id; // Firestore document ID or API ID
   final String lectureId;
-  final String studentId;
-  final String studentName; // Denormalized for easier display
-  final String studentCourse; // Denormalized
-  final String registrationNumber; // Changed from visitNumber
+  final String userId; 
+  final String studentName; 
+  final String registrationNumber;
   final Timestamp joinedAt; // When the student joined the lecture
-  final Timestamp? checkedInAt; // When the lecturer checked the student in
+  final Timestamp? checkInTime; 
+  final bool checkedIn; 
   final String? checkedInBy; // Lecturer's User ID who checked them in
 
-  AttendanceRecord({
+  const AttendanceRecord({ // Use const constructor
     required this.id,
     required this.lectureId,
-    required this.studentId,
+    required this.userId, 
     required this.studentName,
-    required this.studentCourse,
-    required this.registrationNumber, // Changed
+    required this.registrationNumber,
     required this.joinedAt,
-    this.checkedInAt,
+    required this.checkedIn, 
+    this.checkInTime, 
     this.checkedInBy,
   });
 
   // --- Formatting Getters (Optional, for UI) ---
   String get formattedJoinedAt => DateFormat.jm().format(joinedAt.toDate().toLocal());
-  String? get formattedCheckedInAt => checkedInAt == null ? null : DateFormat.jm().format(checkedInAt!.toDate().toLocal());
+  // Getter name
+  String? get formattedCheckInTime => checkInTime == null ? null : DateFormat.jm().format(checkInTime!.toDate().toLocal());
 
 
-  // --- Firestore Conversion (If storing/reading directly from Firestore) ---
+  // --- Firestore Conversion ---
   factory AttendanceRecord.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
     return AttendanceRecord(
       id: doc.id,
-      lectureId: data['lectureId'] ?? '', // Get lectureId
-      studentId: data['studentId'] ?? '',
-      studentName: data['studentName'] ?? 'Unknown Student',
-      studentCourse: data['studentCourse'] ?? 'Unknown Course',
-      registrationNumber: data['registrationNumber'] ?? 'N/A', // Changed, provide default
-      joinedAt: _parseTimestamp(data['joinedAt']) ?? Timestamp.now(), // Use helper, provide default
-      checkedInAt: _parseTimestamp(data['checkedInAt']), // Use helper, nullable
-      checkedInBy: data['checkedInBy'] as String?, // Nullable
+      lectureId: data['lectureId'] as String? ?? '',
+      userId: data['userId'] as String? ?? '',
+      studentName: data['studentName'] as String? ?? 'Unknown Student',
+      registrationNumber: data['registrationNumber'] as String? ?? 'N/A',
+      joinedAt: _parseTimestamp(data['joinedAt']) ?? Timestamp.now(),
+      checkedIn: data['checkedIn'] as bool? ?? false, 
+      checkInTime: _parseTimestamp(data['checkInTime']), 
+      checkedInBy: data['checkedInBy'] as String?,
     );
   }
 
   Map<String, dynamic> toFirestore() {
+    // Used when writing data *to* Firestore from the client (less common for attendance)
     return {
       'lectureId': lectureId,
-      'studentId': studentId,
+      'userId': userId, 
       'studentName': studentName,
-      'studentCourse': studentCourse,
-      'registrationNumber': registrationNumber, // Changed
-      'joinedAt': joinedAt, // Store as Timestamp
-      // Use FieldValue for server-side timestamp on creation/update if possible
-      // 'checkedInAt': checkedInAt ?? FieldValue.delete(), // Store Timestamp or remove if null
-      'checkedInAt': checkedInAt, // Store Timestamp or null
-      'checkedInBy': checkedInBy, // Store String or null
+      'registrationNumber': registrationNumber,
+      'joinedAt': joinedAt, 
+      'checkedIn': checkedIn,
+      'checkInTime': checkInTime, 
+      'checkedInBy': checkedInBy, 
     };
   }
   // --- End Firestore Conversion ---
 
 
-  // --- API Conversion Methods (If interacting via a separate backend API) ---
+  // --- API Conversion Methods (If interacting via backend API) ---
   factory AttendanceRecord.fromApiJson(Map<String, dynamic> json) {
-    // Adapt based on your specific API structure
     return AttendanceRecord(
-      // Use 'id' or '_id' from API, fallback if needed
-      id: json['id'] ?? json['_id'] ?? json['registrationNumber'] ?? '', // Example fallbacks
-      lectureId: json['lectureId'] ?? '', // Expect lectureId from API
-      studentId: json['studentId'] ?? '',
-      studentName: json['studentName'] ?? 'Unknown Student',
-      studentCourse: json['studentCourse'] ?? 'Unknown Course',
-      registrationNumber: json['registrationNumber'] ?? 'N/A', // Changed
-      joinedAt: _parseTimestamp(json['joinedAt']) ?? Timestamp.now(), // Provide default
-      checkedInAt: _parseTimestamp(json['checkedInAt']), // Nullable
-      checkedInBy: json['checkedInBy'] as String?, // Nullable
+      // Use 'id' or '_id' from API, fallback
+      id: json['id'] as String? ?? json['_id'] as String? ?? '',
+      lectureId: json['lectureId'] as String? ?? '',
+      userId: json['userId'] as String? ?? '', 
+      studentName: json['studentName'] as String? ?? 'Unknown Student',
+      registrationNumber: json['registrationNumber'] as String? ?? 'N/A',
+      joinedAt: _parseTimestamp(json['joinedAt']) ?? Timestamp.now(), 
+      checkedIn: json['checkedIn'] as bool? ?? false, 
+      checkInTime: _parseTimestamp(json['checkInTime']), // nullable
+      checkedInBy: json['checkedInBy'] as String?,
     );
   }
 
   Map<String, dynamic> toApiJson() {
     // Convert object to JSON map suitable for sending TO the API
-    // Only include fields the API expects for creation/update
-    // This method might not be needed if records are only created/updated via specific API actions (join, checkin)
     return {
       // 'id': id, // Usually not sent when creating/updating via actions
       'lectureId': lectureId,
-      'studentId': studentId,
-      'studentName': studentName, // May be redundant if backend gets from studentId
-      'studentCourse': studentCourse, // May be redundant
-      'registrationNumber': registrationNumber, // Changed
+      'userId': userId,
+      'studentName': studentName,
+      'registrationNumber': registrationNumber,
       'joinedAt': _toIso8601String(joinedAt), // Send as ISO string
-      'checkedInAt': _toIso8601String(checkedInAt), // Send as ISO string or null
+      'checkedIn': checkedIn,
+      'checkInTime': _toIso8601String(checkInTime), // Renamed, send as ISO string or null
       'checkedInBy': checkedInBy,
     };
   }
@@ -132,49 +140,60 @@ class AttendanceRecord {
    AttendanceRecord copyWith({
     String? id,
     String? lectureId,
-    String? studentId,
+    String? userId, 
     String? studentName,
-    String? studentCourse,
-    String? registrationNumber, // Changed
+    String? registrationNumber,
     Timestamp? joinedAt,
-    Timestamp? checkedInAt,
+    bool? checkedIn, 
+    Timestamp? checkInTime, 
     String? checkedInBy,
     // Add bool flags to explicitly handle setting nullable fields to null
-    bool setCheckedInAtNull = false,
+    bool setCheckInTimeNull = false, 
     bool setCheckedInByNull = false,
   }) {
     return AttendanceRecord(
       id: id ?? this.id,
       lectureId: lectureId ?? this.lectureId,
-      studentId: studentId ?? this.studentId,
+      userId: userId ?? this.userId, 
       studentName: studentName ?? this.studentName,
-      studentCourse: studentCourse ?? this.studentCourse,
-      registrationNumber: registrationNumber ?? this.registrationNumber, // Changed
+      registrationNumber: registrationNumber ?? this.registrationNumber,
       joinedAt: joinedAt ?? this.joinedAt,
-      checkedInAt: setCheckedInAtNull ? null : (checkedInAt ?? this.checkedInAt),
+      checkedIn: checkedIn ?? this.checkedIn, 
+      checkInTime: setCheckInTimeNull ? null : (checkInTime ?? this.checkInTime), 
       checkedInBy: setCheckedInByNull ? null : (checkedInBy ?? this.checkedInBy),
     );
   }
 
    @override
   String toString() {
-    return 'AttendanceRecord(id: $id, lectureId: $lectureId, studentName: $studentName, regNo: $registrationNumber, joinedAt: $joinedAt, checkedIn: ${checkedInAt != null})'; // Changed
+    return 'AttendanceRecord(id: $id, lectureId: $lectureId, userId: $userId, studentName: $studentName, regNo: $registrationNumber, joinedAt: $joinedAt, checkedIn: $checkedIn, checkInTime: $checkInTime, checkedInBy: $checkedInBy)';
   }
 
    @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
+
     return other is AttendanceRecord &&
         other.id == id &&
         other.lectureId == lectureId &&
-        other.studentId == studentId &&
-        other.registrationNumber == registrationNumber; // Changed: Compare key fields
+        other.userId == userId && 
+        other.studentName == studentName &&
+        other.registrationNumber == registrationNumber &&
+        other.joinedAt == joinedAt &&
+        other.checkedIn == checkedIn && 
+        other.checkInTime == checkInTime && 
+        other.checkedInBy == checkedInBy;
   }
 
   @override
   int get hashCode =>
       id.hashCode ^
       lectureId.hashCode ^
-      studentId.hashCode ^
-      registrationNumber.hashCode; // Changed: Hash key fields
+      userId.hashCode ^ 
+      studentName.hashCode ^
+      registrationNumber.hashCode ^
+      joinedAt.hashCode ^
+      checkedIn.hashCode ^
+      checkInTime.hashCode ^ 
+      checkedInBy.hashCode;
 }
