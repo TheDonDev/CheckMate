@@ -4,6 +4,7 @@
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
     "firebase-admin": "^13.2.0",
-    "http": "^0.0.1-security"
+    "http": "^0.0.1-security",
+    "twilio": "^5.5.2"
   }
 }

@@ -14,13 +14,13 @@ const List<String> schoolsList = [
 const Map<String, List<String>> departmentsMap = {
   "School of Science Technology and Engineering": [
     "Department of Chemistry and Biochemistry",
-    "Department of  Mathematics, Physics and Computer", 
+    "Department of Mathematics, Physics and Computer",
     "Department of Biological and Agricultural Sciences",
   ],
   "School of Health Sciences": [
     "Department of Public Health, Nutrition and Behavioural Sciences",
     "Department of Anatomy, Physiology and Medical Biochemistry",
-    "Department of Medical Laboratory Sciences", 
+    "Department of Medical Laboratory Sciences",
     "Department of Physiotherapy",
   ],
   "School of Education and Social Sciences": [
@@ -31,7 +31,7 @@ const Map<String, List<String>> departmentsMap = {
   ],
   "School of Business, Economics and Human Resource Development": [
     "Department of Finance, Accounting and Procurement and Economics (FAPE)",
-    "Department of Marketing, Hospitality and Human Resource", 
+    "Department of Marketing, Hospitality and Human Resource",
   ],
 };
 
@@ -83,20 +83,34 @@ const Map<String, List<String>> coursesMap = {
   ],
 };
 
-/// List of common venues or locations within the university.
+/// List of specific venues or locations within the university.
 /// Used potentially for scheduling or location selection elsewhere in the app.
 const List<String> venuesList = [
-  'Science Block L1',
-  'Science Block L2',
-  'Science Block L3',
-  'Science Block L4',
-  'Science Block L5',
-  'Science Lab',
-  'Computer Lab',
-  'School of Health Science', //consider specific labs/rooms
-  'Auditorium',
-  'Library'
-  // Add more specific venues as needed
+  "SKILLS LAB HALL (TU)", // SL-HALL
+  "SKILLS LAB HALL-ANNEX 1 (TU)", // SL-A1
+  "SKILLS LAB HALL-ANNEX 2(TU)", // SL-A2
+  "HOTEL & HOSPITALITY WORKSHOP", // HH-W
+  "HOTEL & HOSPITALITY ANNEX", // HH-A
+  "NEW GENERAL LAB (SSTE BLOCK)", // NGL
+  "NEW LECTURE ROOM 1 (SSTE BLOCK)", // NLR-1
+  "NEW LECTURE ROOM 2 (SSTE BLOCK)", // NLR-2
+  "NEW SCIENCE BLOCK LECTURE HALL 1 (SSTE BLOCK)", // NSB-LH1
+  "NEW SCIENCE BLOCK LECTURE HALL 2 (SSTE BLOCK)", // NSB-LH2
+  "NEW SCIENCE BLOCK LECTURE HALL 3 (SSTE BLOCK)", // NSB-LH3
+  "MEDICAL LAB LECTURE HALL 2 (SHS BLOCK)", // ML-LH2
+  "MEDICAL LAB LECTURE HALL 3 (SHS BLOCK)",
+  "MEDICAL LAB LECTURE HALL 4 (SHS BLOCK)", // ML-LH3/4
+  "PHYSIOTHERAPY SKILLS LAB (SHS BLOCK)", // PT-SL
+  "COMPUTER LAB (SSTE BLOCK)", // COM-LB
+  "MICRO-TEACHING LAB (FORMER LIBRARY)", // MT-LB
+  "LIBRARY FIRST FLOOR MAIN HALL (NEW LIBRARY)", // LIB-FFM
+  "LIBRARY FIRST FLOOR ANNEX (NEW LIBRARY)", // LIB-FFA
+  "LIBRARY SECOND FLOOR MAIN HALL (NEW LIBRARY)", // LIB-SFM
+  "LIBRARY SECOND FLOOR ANNEX (NEW LIBRARY)", // LIB-SFA
+  "LIBRARY LECTURE HALL 3 (LIBRARY 3RD FLOOR)", // LIB-LH3
+  "LIBRARY LECTURE HALL 4 (LIBRARY 4TH FLOOR)", // LIB-LH4
+  "GEOGRAPHY LAB (FORMER LIBRARY)", // GEO-LB
+  "COUNSELING PSYCHOLOGY LAB (FORMER LIBRARY)", // CP-LB
 ];
 
 /// List of academic years of study for students.
