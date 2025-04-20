@@ -64,7 +64,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     // Pre-fill lecturer's phone if available
     _lecturerPhoneController.text = widget.currentUser.phoneNumber;
     // Pre-fill lecturer's school if available (optional)
-    // _selectedSchool = widget.currentUser.school;
+    // _selectedSchool = widget.currentUser.school; // Uncomment and ensure currentUser has school if needed
     _updateDependentDropdowns(); // Initialize based on potentially pre-selected school
   }
 
@@ -98,9 +98,18 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: CreateLectureDialog.brandColor, width: 1.5),
       ),
+      errorBorder: OutlineInputBorder( // Define error border style
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.error, width: 1.0),
+      ),
+      focusedErrorBorder: OutlineInputBorder( // Define focused error border style
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Theme.of(context).colorScheme.error, width: 1.5),
+      ),
       filled: true,
       fillColor: Colors.grey[100], // Subtle background fill
       contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+      errorStyle: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error), // Style for error text
     );
   }
 
@@ -246,9 +255,9 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         course: _selectedCourse!,
         yearOfStudy: _selectedYear!,
         semester: _selectedSemester!,
-        // Use the text from controllers, which will be uppercase
+        // Use the text from controllers, which will be uppercase and validated
         unitName: _unitNameController.text.trim(),
-        unitCode: _unitCodeController.text.trim(),
+        unitCode: _unitCodeController.text.trim(), // Already validated by form
         lectureDate: _selectedDate, // Pass DateTime?
         startTime: startDateTime,   // Pass DateTime
         endTime: endDateTime,     // Pass DateTime
@@ -321,7 +330,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   controller: _lecturerPhoneController,
                   decoration: _inputDecoration('Your Phone Number', prefixIcon: const Icon(Icons.phone_outlined), isRequired: false), // Not strictly required by backend logic
                   keyboardType: TextInputType.phone,
-                  // validator: (value) => (value == null || value.trim().isEmpty) ? 'Phone number is required' : null, // Optional validation
+                  // Optional: Add phone number validation if needed
+                  // validator: (value) { ... }
                 ),
                 const SizedBox(height: 12),
 
@@ -388,7 +398,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // --- Unit Name (MODIFIED) ---
+                // --- Unit Name ---
                 TextFormField(
                   controller: _unitNameController,
                   decoration: _inputDecoration('Unit Name', prefixIcon: const Icon(Icons.label_outline)),
@@ -396,27 +406,43 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                     UpperCaseTextFormatter(),
                     // Optional: Add other formatters if needed (e.g., FilteringTextInputFormatter)
                   ],
-                  // --- ADDED: Suggest uppercase keyboard ---
-                  textCapitalization: TextCapitalization.characters,
+                  textCapitalization: TextCapitalization.characters, // Suggest uppercase keyboard
                   validator: (value) => (value == null || value.trim().isEmpty) ? 'Unit name is required' : null,
                 ),
                 // --- End Unit Name ---
                 const SizedBox(height: 12),
 
-                // --- Unit Code (MODIFIED) ---
+                // --- Unit Code (MODIFIED with Format Enforcement) ---
                 TextFormField(
                   controller: _unitCodeController,
-                  decoration: _inputDecoration('Unit Code', prefixIcon: const Icon(Icons.code_outlined)),
-                  // --- ADDED: Force uppercase input ---
+                  // --- UPDATED Decoration ---
+                  decoration: _inputDecoration(
+                    'Unit Code',
+                    hint: 'E.g., COM 123, IRD 100', // Updated hint
+                    prefixIcon: const Icon(Icons.code_outlined)
+                  ),
+                  // --- UPDATED Input Formatters ---
                   inputFormatters: [
-                    UpperCaseTextFormatter(),
-                    // Optional: Add other formatters if needed (e.g., FilteringTextInputFormatter for specific characters)
+                    UpperCaseTextFormatter(), // Force uppercase
+                    FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9 ]')), // Allow only letters, digits, and space
+                    // Optional: Could add a more complex formatter to auto-insert space, but validator is simpler
                   ],
-                  // --- ADDED: Suggest uppercase keyboard ---
-                  textCapitalization: TextCapitalization.characters,
-                  validator: (value) => (value == null || value.trim().isEmpty) ? 'Unit code is required' : null,
+                  textCapitalization: TextCapitalization.characters, // Suggest uppercase keyboard
+                  // --- UPDATED Validator ---
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Unit code is required';
+                    }
+                    final trimmedValue = value.trim();
+                    // Regex for format like "COM 123" or "IRD 100" (Letters{1+} Space Digits{1+})
+                    final RegExp unitCodeFormat = RegExp(r'^[A-Z]+ \d+$');
+                    if (!unitCodeFormat.hasMatch(trimmedValue)) {
+                      return 'Format must be like "COM 123" (Letters Space Digits)';
+                    }
+                    return null; // Valid format
+                  },
+                  // --- END UPDATES for Unit Code ---
                 ),
-                // --- End Unit Code ---
                 const SizedBox(height: 15),
 
                 // --- Date/Time Pickers ---

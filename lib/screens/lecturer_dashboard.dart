@@ -9,7 +9,21 @@ import 'package:flutter/material.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:provider/provider.dart';
-// Import for kDebugMode if needed elsewhere
+import 'package:flutter/services.dart'; // Import for input formatters
+
+// --- Copied from register_screen.dart (or move to a shared file) ---
+// Custom Input Formatter to force uppercase input
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(), // Convert text to uppercase
+      selection: newValue.selection,     // Keep cursor position
+    );
+  }
+}
+// --- End Copied Formatter ---
+
 
 class LecturerDashboard extends StatefulWidget {
   final app_user.User currentUser;
@@ -74,10 +88,12 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     }
   }
 
-  // --- Modified: Check-In Dialog uses Registration Number ---
+  // --- Modified: Check-In Dialog uses Registration Number with Formatting/Validation ---
   void showCheckInDialog(Lecture lecture) {
     final registrationNumberController = TextEditingController();
     bool isCheckingIn = false;
+    // Define the allowed characters regex consistent with register_screen.dart
+    final RegExp allowedRegNumChars = RegExp(r'^[A-Z0-9/-]+$');
 
     showDialog(
       context: context,
@@ -92,7 +108,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                 controller: registrationNumberController,
                 decoration: InputDecoration( // Apply consistent decoration
                   labelText: 'Student Registration Number', // Updated label
-                  hintText: 'e.g., SCT211-00XX/YYYY', // Updated hint
+                  hintText: 'e.g., SSTE/COM03/047/21', // Updated hint example
                   prefixIcon: Icon(Icons.badge_outlined, color: brandColor.withOpacity(0.7)), // Updated icon
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   enabledBorder: OutlineInputBorder(
@@ -106,8 +122,14 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   filled: true,
                   fillColor: Colors.grey[50],
                 ),
-                keyboardType: TextInputType.text, // Allow text and symbols
-                textCapitalization: TextCapitalization.characters, // Suggest uppercase
+                // --- ADDED INPUT FORMATTERS ---
+                inputFormatters: [
+                  UpperCaseTextFormatter(), // Ensure uppercase
+                  FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9/-]')), // Allow only valid chars
+                ],
+                // --- END ADDED INPUT FORMATTERS ---
+                keyboardType: TextInputType.text, // Keep as text
+                textCapitalization: TextCapitalization.characters, // Suggest uppercase (redundant with formatter but good UX)
                 autofocus: true,
               ),
               actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -120,18 +142,27 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                 ElevatedButton(
                   // Disable button while checking in
                   onPressed: isCheckingIn ? null : () async {
-                    final registrationNumber = registrationNumberController.text.trim().toUpperCase(); // Get reg number, trim, maybe uppercase
+                    // Get the formatted (uppercase) registration number
+                    final registrationNumber = registrationNumberController.text.trim();
+
+                    // --- ADDED VALIDATION ---
                     if (registrationNumber.isEmpty) {
-                      // Show error using the main scaffold's snackbar
                       showSnackBar('Please enter a registration number.', isError: true);
                       return; // Keep dialog open
                     }
+                    // Validate allowed characters (safety check, formatters should handle most)
+                    if (!allowedRegNumChars.hasMatch(registrationNumber)) {
+                       showSnackBar('Registration number contains invalid characters.\nAllowed: A-Z, 0-9, /, -', isError: true);
+                       return; // Keep dialog open
+                    }
+                    // --- END ADDED VALIDATION ---
+
                     setDialogState(() => isCheckingIn = true); // Show loading indicator
                     try {
-                      // *** CORRECT API CALL ***
+                      // *** API CALL uses the validated registrationNumber ***
                       final AttendanceRecord checkedInRecord = await apiService.checkInStudent(
                         lecture.id,
-                        registrationNumber, // Pass registration number
+                        registrationNumber, // Pass validated registration number
                       );
                       // Check if dialog context is still mounted before interacting with it
                       if (!dialogContext.mounted) return;
@@ -142,7 +173,13 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                        // Check if dialog context is still mounted before showing snackbar
                        if (!dialogContext.mounted) return;
                        // Don't pop the dialog on error, show error message
-                       showSnackBar('Check-in failed: ${e.toString()}', isError: true);
+                       // Extract specific error message if possible
+                       String errorMessage = 'Check-in failed: An unknown error occurred.';
+                       if (e is Exception) { // Check if it's a general Exception
+                          errorMessage = 'Check-in failed: ${e.toString().replaceFirst("Exception: ", "")}';
+                       }
+                       // Consider adding specific checks for ApiService exceptions if defined
+                       showSnackBar(errorMessage, isError: true);
                     } finally {
                        // Ensure loading state is reset if dialog is still mounted
                        if (dialogContext.mounted) {
