@@ -10,6 +10,12 @@ import 'package:provider/provider.dart';
 import 'package:checkmate/screens/welcome_screen.dart'; // Import WelcomeScreen for logout
 import 'package:flutter/foundation.dart'; // Import for kDebugMode
 
+// --- Import the QR Scanner Screen ---
+import 'package:checkmate/screens/qr_scanner_screen.dart'; // Ensure this path is correct
+
+// --- Import collection package ---
+import 'package:collection/collection.dart'; // Import for firstWhereOrNull
+
 class StudentDashboard extends StatefulWidget {
   final app_user.User currentUser;
   const StudentDashboard({super.key, required this.currentUser});
@@ -22,8 +28,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
   final ApiService apiService = ApiService();
   Future<List<Lecture>>? lecturesFuture;
   String? joinedLectureId; // Keep track of the lecture just joined for UI feedback
-  bool isJoining = false; // Loading state for the join button/dialog
-  String? _joiningLectureIdTemp; // Track which lecture is being joined
+  bool isJoining = false; // Loading state for the manual join button/dialog
+  String? _joiningLectureIdTemp; // Track which lecture is being joined manually
+
+  // --- Add QR Check-in State ---
+  bool _isCheckingInViaQr = false; // Loading state for QR check-in process
 
   // Filter State
   String? fixedSchool;
@@ -130,8 +139,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     } else if (mounted) {
       // Handle case where dialog was closed without selection (e.g., back button)
       if (kDebugMode) print("Initial filter dialog closed unexpectedly or without valid selection.");
-      // Optionally show an error or force the dialog again if initial selection is critical.
-      // For now, the UI will show a placeholder message.
+      // UI will show a placeholder message.
     }
   }
 
@@ -171,7 +179,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
   void loadLectures() {
     // Don't attempt to load if initial filters haven't been applied or are invalid.
     if (!initialFiltersApplied || selectedYear == null || selectedSemester == null) {
-      // Clear any existing future if filters become invalid
       if (lecturesFuture != null && mounted) {
          setState(() { lecturesFuture = null; });
       }
@@ -184,111 +191,141 @@ class _StudentDashboardState extends State<StudentDashboard> {
       lecturesFuture = apiService.getStudentLectures(
         fixedSchool, fixedDepartment, fixedCourse, selectedYear, selectedSemester,
       );
-      // TODO: Optionally, fetch the student's current attendance status for these lectures
-      // to pre-mark lectures they already joined in this session.
     });
   }
 
-  // Show a confirmation dialog before joining a lecture.
+  // Show a confirmation dialog before joining a lecture manually.
   Future<void> showJoinLectureDialog(Lecture lecture) async {
-    // Double-check registration number existence.
     final studentRegNum = widget.currentUser.registrationNumber;
     if (studentRegNum == null || studentRegNum.isEmpty) {
       showSnackBar('Error: Your registration number is missing. Cannot join lecture.', isError: true);
       return;
     }
+    if (isJoining || _isCheckingInViaQr) return; // Prevent if already processing
 
-    // Prevent multiple concurrent join attempts.
-    if (isJoining) return;
+    setState(() { isJoining = true; _joiningLectureIdTemp = lecture.id; });
 
-    // Set loading state specific to this lecture join attempt.
-    setState(() {
-      isJoining = true;
-      _joiningLectureIdTemp = lecture.id;
-    });
-
-    // Show confirmation dialog.
     final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false, // Prevent dismissing by tapping outside
+      context: context, barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
           title: Text('Confirm Join: ${lecture.unitName}'),
           content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('You are about to join this lecture using your registered number:'),
               const SizedBox(height: 10),
-              // Display registration number read-only.
               InputChip(
                 label: Text(studentRegNum, style: TextStyle(fontWeight: FontWeight.bold, color: brandColor)),
                 avatar: Icon(Icons.badge_outlined, color: brandColor),
-                backgroundColor: brandColor.withOpacity(0.1),
-                side: BorderSide.none,
-                isEnabled: false,
+                backgroundColor: brandColor.withOpacity(0.1), side: BorderSide.none, isEnabled: false,
               ),
               const SizedBox(height: 15),
-              // Display lecture details.
-              Text('Date: ${lecture.formattedDate}'),
-              Text('Time: ${lecture.formattedStartTime} - ${lecture.formattedEndTime}'),
-              Text('Venue: ${lecture.venue}'),
+              Text('Date: ${lecture.formattedDate}'), Text('Time: ${lecture.formattedStartTime} - ${lecture.formattedEndTime}'), Text('Venue: ${lecture.venue}'),
             ],
           ),
           actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false), // Cancel
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
             ElevatedButton.icon(
-              icon: const Icon(Icons.login),
-              label: const Text('Confirm Join'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: brandColor,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-              onPressed: () => Navigator.of(dialogContext).pop(true), // Confirm
+              icon: const Icon(Icons.login), label: const Text('Confirm Join'),
+              style: ElevatedButton.styleFrom(backgroundColor: brandColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
             ),
           ],
         );
       },
     );
 
-    // If dialog was cancelled, reset loading state and exit.
     if (confirmed != true) {
-       if (mounted) {
-         setState(() { isJoining = false; _joiningLectureIdTemp = null; });
-       }
+       if (mounted) { setState(() { isJoining = false; _joiningLectureIdTemp = null; }); }
        return;
     }
 
-    // --- Proceed with API call if confirmed ---
     try {
-      // *** CORRECTED API CALL: Only pass lectureId ***
-      // Backend uses the auth token to identify the student.
+      // Use the existing joinLecture API call
       final AttendanceRecord attendanceRecord = await apiService.joinLecture(lecture.id);
-
-      if (!mounted) return; // Check mount status after async gap
-      // Update UI to show "Joined" status for this lecture.
-      setState(() {
-        joinedLectureId = lecture.id;
-      });
+      if (!mounted) return;
+      setState(() { joinedLectureId = lecture.id; });
       showSnackBar('Successfully joined ${lecture.unitName}!', isError: false);
     } catch (e) {
-      if (!mounted) return; // Check mount status after async gap
+      if (!mounted) return;
       showSnackBar('Failed to join lecture: ${e.toString()}', isError: true);
-      // Note: We don't reset joinedLectureId on failure, as the user might have already joined previously
-      // and the error could be temporary (e.g., network). The UI will just show the error.
     } finally {
-      // Reset loading state regardless of success/failure.
-      if (mounted) {
-        setState(() { isJoining = false; _joiningLectureIdTemp = null; });
-      }
+      if (mounted) { setState(() { isJoining = false; _joiningLectureIdTemp = null; }); }
     }
   }
+
+  // --- Function to handle QR Code Scan and Check-In ---
+  Future<void> _scanAndCheckIn() async {
+    // Prevent action if registration number is missing or already processing
+    if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
+       showSnackBar('Error: Your registration number is missing. Cannot check in.', isError: true);
+       return;
+    }
+    if (_isCheckingInViaQr || isJoining) return;
+
+    // Navigate to the scanner screen and wait for a result (lectureId)
+    final String? scannedLectureId = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
+    );
+
+    if (!mounted) return; // Check again after await
+
+    if (scannedLectureId != null && scannedLectureId.isNotEmpty) {
+      print("Scanned Lecture ID: $scannedLectureId"); // Debug log
+
+      // Show loading indicator
+      setState(() { _isCheckingInViaQr = true; });
+
+      try {
+        // Call the existing joinLecture method, passing the scanned lecture ID
+        final AttendanceRecord attendanceRecord = await apiService.joinLecture(scannedLectureId);
+
+        if (!mounted) return; // Check mount status after async gap
+
+        // Update UI: Mark the specific lecture as joined/checked-in if it's currently displayed
+        setState(() {
+           joinedLectureId = scannedLectureId; // Mark for potential UI update in list builder
+        });
+
+        // Find lecture name for better feedback (optional, requires searching the list)
+        String lectureName = "lecture"; // Default
+        if (lecturesFuture != null) {
+           try {
+              // Await the future to get the list if it's not already completed
+              final lectures = await lecturesFuture;
+              // --- CORRECTED: Use firstWhereOrNull ---
+              final Lecture? foundLecture = lectures?.firstWhereOrNull(
+                  (l) => l.id == scannedLectureId
+              );
+              // --- END CORRECTION ---
+              // Check if foundLecture is not null before accessing its properties
+              if (foundLecture != null) {
+                 lectureName = "'${foundLecture.unitName}'";
+              }
+           } catch (_) { /* Ignore error if future fails here, use default name */ }
+        }
+        showSnackBar('Successfully checked in for $lectureName!', isError: false);
+        // Optionally refresh the list if the backend might filter out joined lectures
+        // loadLectures();
+
+      } catch (e) {
+        if (!mounted) return; // Check mount status after async gap
+        showSnackBar('QR Check-in failed: ${e.toString()}', isError: true);
+      } finally {
+        // Hide loading indicator regardless of success/failure
+        if (mounted) {
+          setState(() { _isCheckingInViaQr = false; });
+        }
+      }
+    } else {
+      print("QR Scan cancelled or returned empty lecture ID.");
+    }
+  }
+
 
   // Helper to show snackbar messages.
   void showSnackBar(String message, {bool isError = false}) {
@@ -308,8 +345,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context, listen: false);
     final textTheme = Theme.of(context).textTheme;
-    // Determine if student can join lectures (based on registration number existence).
-    final bool canJoinLectures = widget.currentUser.registrationNumber != null && widget.currentUser.registrationNumber!.isNotEmpty;
+    // Determine if student can perform actions (based on registration number existence).
+    final bool canPerformActions = widget.currentUser.registrationNumber != null && widget.currentUser.registrationNumber!.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -318,23 +355,29 @@ class _StudentDashboardState extends State<StudentDashboard> {
         foregroundColor: Colors.white,
         elevation: 2.0,
         actions: [
-           // Button to refine filters. Disabled if initial filters not set or cannot join.
+           // --- Show loading indicator in AppBar if checking in via QR ---
+           if (_isCheckingInViaQr)
+             const Padding(
+               padding: EdgeInsets.only(right: 15.0),
+               child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))),
+             ),
+           // Button to refine filters. Disabled if initial filters not set or cannot perform actions.
            IconButton(
-             icon: Icon(Icons.edit_calendar_outlined, color: initialFiltersApplied ? Colors.white : Colors.white54),
+             icon: Icon(Icons.edit_calendar_outlined, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
              tooltip: 'Change Year/Semester',
-             onPressed: initialFiltersApplied && canJoinLectures ? showRefineFilterDialog : null,
+             onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr ? showRefineFilterDialog : null,
            ),
-           // Button to refresh lectures. Disabled if initial filters not set or cannot join.
+           // Button to refresh lectures. Disabled if initial filters not set or cannot perform actions.
            IconButton(
-             icon: Icon(Icons.refresh, color: initialFiltersApplied ? Colors.white : Colors.white54),
+             icon: Icon(Icons.refresh, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
              tooltip: 'Refresh Lectures',
-             onPressed: initialFiltersApplied && canJoinLectures ? loadLectures : null,
+             onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr ? loadLectures : null,
            ),
-           // Logout button.
+           // Logout button. Disabled if checking in.
            IconButton(
              icon: const Icon(Icons.logout),
              tooltip: 'Logout',
-             onPressed: () async {
+             onPressed: _isCheckingInViaQr ? null : () async {
                 // Show confirmation dialog before logging out.
                 final confirm = await showDialog<bool>(
                   context: context,
@@ -365,11 +408,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
            ),
         ],
       ),
+      // --- Add Floating Action Button for QR Scan ---
+      floatingActionButton: canPerformActions // Only show FAB if student can perform actions
+          ? FloatingActionButton.extended(
+              onPressed: _isCheckingInViaQr ? null : _scanAndCheckIn, // Disable while processing
+              label: const Text('Scan QR'),
+              icon: const Icon(Icons.qr_code_scanner),
+              backgroundColor: brandColor,
+              foregroundColor: Colors.white,
+              tooltip: 'Scan Lecture QR Code to Check-In',
+            )
+          : null, // Don't show FAB if reg number is missing
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat, // Position FAB
+      // --- End FAB ---
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Display selected filters if they have been applied.
-          if (initialFiltersApplied && canJoinLectures) ...[
+          if (initialFiltersApplied && canPerformActions) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 8.0),
               child: Text(
@@ -393,7 +449,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
           // Main content area: Either lecture list or placeholder message.
           Expanded(
-            child: initialFiltersApplied && canJoinLectures
+            child: initialFiltersApplied && canPerformActions
                 // If filters are applied and student can join, show lecture list.
                 ? RefreshIndicator(
                     color: brandColor,
@@ -439,35 +495,23 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         final lectures = snapshot.data!;
                         // Sort lectures: Earliest start time first (ascending)
                         lectures.sort((a, b) {
-                          // *** Corrected Null-Safe Sorting (Ascending) ***
-                          final aTime = a.startTime;
-                          final bTime = b.startTime;
-
-                          // Handle null times (treat null as later/less relevant)
-                          if (aTime == null && bTime == null) {
-                            return 0; // Both null, equal
-                          } else if (aTime == null) {
-                            return 1; // a (null) comes after b (non-null)
-                          } else if (bTime == null) {
-                            return -1; // b (null) comes after a (non-null)
-                          } else {
-                            // Both times non-null, compare ascending
-                            return aTime.compareTo(bTime);
-                          }
-                          // Note: Date comparison removed as backend filters for upcoming lectures.
+                          final aTime = a.startTime; final bTime = b.startTime;
+                          if (aTime == null && bTime == null) return 0;
+                          if (aTime == null) return 1; if (bTime == null) return -1;
+                          return aTime.compareTo(bTime);
                         });
 
                         // Build the list view
                         return ListView.builder(
                            physics: const AlwaysScrollableScrollPhysics(), // Ensure scrolling for RefreshIndicator
-                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                           padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 80), // Add bottom padding for FAB
                            itemCount: lectures.length,
                            itemBuilder: (context, index) {
                               final lecture = lectures[index];
-                              // Check if this lecture was the one just successfully joined.
+                              // Check if this lecture was the one just successfully joined/checked-in.
                               final bool isSuccessfullyJoined = lecture.id == joinedLectureId;
-                              // Check if this specific lecture is currently being joined.
-                              final bool isCurrentlyJoining = isJoining && _joiningLectureIdTemp == lecture.id;
+                              // Check if this specific lecture is currently being joined manually.
+                              final bool isCurrentlyJoiningManually = isJoining && _joiningLectureIdTemp == lecture.id;
 
                               // Build list tile for each lecture.
                               return Card(
@@ -491,20 +535,20 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                   isThreeLine: true, // Allow subtitle to wrap
                                   // Trailing widget: Either "Joined" chip or "Join" button.
                                   trailing: isSuccessfullyJoined
-                                    // Show "Joined" chip if successfully joined.
+                                    // Show "Joined" chip if successfully joined/checked-in.
                                     ? Chip(
-                                        avatar: Icon(Icons.check_circle_outline, size: 18, color: Colors.green.shade800),
-                                        label: Text('Joined', style: TextStyle(color: Colors.green.shade900, fontWeight: FontWeight.w500)),
+                                        avatar: Icon(Icons.check_circle, size: 18, color: Colors.green.shade800), // Use filled check
+                                        label: Text('Checked In', style: TextStyle(color: Colors.green.shade900, fontWeight: FontWeight.w500)),
                                         backgroundColor: Colors.green.shade100,
                                         side: BorderSide.none,
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       )
                                     // Show "Join" button otherwise.
                                     : ElevatedButton(
-                                        // Disable button if any join is in progress or if student cannot join.
-                                        onPressed: (isJoining || !canJoinLectures)
+                                        // Disable button if any join/scan is in progress or if student cannot perform actions.
+                                        onPressed: (isJoining || _isCheckingInViaQr || !canPerformActions)
                                             ? null
-                                            : () => showJoinLectureDialog(lecture), // Trigger join confirmation
+                                            : () => showJoinLectureDialog(lecture), // Trigger manual join confirmation
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: brandColor,
                                           foregroundColor: Colors.white,
@@ -514,7 +558,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                           minimumSize: const Size(80, 36),
                                         ),
                                         // Show loading indicator or "Join" text.
-                                        child: isCurrentlyJoining
+                                        child: isCurrentlyJoiningManually
                                           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                           : const Text('Join'),
                                       ),
@@ -532,20 +576,30 @@ class _StudentDashboardState extends State<StudentDashboard> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Show different icon/message based on the reason for not showing lectures.
                           Icon(
-                            canJoinLectures ? Icons.filter_list_off_outlined : Icons.warning_amber_rounded,
+                            canPerformActions ? Icons.filter_list_off_outlined : Icons.warning_amber_rounded,
                             size: 50,
-                            color: canJoinLectures ? Colors.grey.shade400 : Colors.orange.shade600,
+                            color: canPerformActions ? Colors.grey.shade400 : Colors.orange.shade600,
                           ),
                           const SizedBox(height: 20),
                           Text(
-                            canJoinLectures
+                            canPerformActions
                               ? 'Please select your Year and Semester\nto view available lectures.'
                               : 'Cannot load lectures.\nYour registration number might be missing.',
                             textAlign: TextAlign.center,
                             style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                           ),
+                          // Add a button to retry initial filter selection if needed
+                          if (!initialFiltersApplied && canPerformActions) // Corrected condition: Show if initial filters not applied AND can perform actions
+                             Padding(
+                               padding: const EdgeInsets.only(top: 15.0),
+                               child: ElevatedButton.icon(
+                                 icon: const Icon(Icons.filter_list),
+                                 label: const Text('Select Year/Semester'),
+                                 onPressed: showInitialFilterDialog,
+                                 style: ElevatedButton.styleFrom(backgroundColor: brandColor, foregroundColor: Colors.white),
+                               ),
+                             )
                         ],
                       ),
                     ),

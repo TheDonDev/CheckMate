@@ -11,8 +11,11 @@ import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart'; // Import for input formatters
 
-// --- Copied from register_screen.dart (or move to a shared file) ---
-// Custom Input Formatter to force uppercase input
+// --- Import the QR Scanner Screen ---
+import 'package:checkmate/screens/qr_scanner_screen.dart'; // Ensure this path is correct
+
+// --- Custom Input Formatter to force uppercase input ---
+// (Consider moving this to a shared 'utils' or 'widgets' folder if used elsewhere)
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -22,7 +25,7 @@ class UpperCaseTextFormatter extends TextInputFormatter {
     );
   }
 }
-// --- End Copied Formatter ---
+// --- End Formatter ---
 
 
 class LecturerDashboard extends StatefulWidget {
@@ -36,9 +39,12 @@ class LecturerDashboard extends StatefulWidget {
 class _LecturerDashboardState extends State<LecturerDashboard> {
   final ApiService apiService = ApiService();
   late Future<List<Lecture>> lecturesFuture;
+  bool _isCheckingInViaQr = false; // Loading state for QR check-in
 
   // Define the brand color (consistent styling)
   static const Color brandColor = Color(0xFF0175C2);
+  // Define the allowed characters regex consistent with register_screen.dart
+  final RegExp allowedRegNumChars = RegExp(r'^[A-Z0-9/-]+$');
 
   @override
   void initState() {
@@ -56,7 +62,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     });
   }
 
-  // Helper to show snackbar messages
+  // Helper to show snackbar messages (uses the main Scaffold context)
   void showSnackBar(String message, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -88,12 +94,52 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     }
   }
 
-  // --- Modified: Check-In Dialog uses Registration Number with Formatting/Validation ---
+  // --- Refactored Check-In Logic (Handles API call and feedback) ---
+  Future<bool> _performCheckIn(String registrationNumber, Lecture lecture, BuildContext currentContext) async {
+    // Validate allowed characters (safety check)
+    if (!allowedRegNumChars.hasMatch(registrationNumber)) {
+       // Use the provided context to show the snackbar
+       if (currentContext.mounted) {
+          ScaffoldMessenger.of(currentContext).showSnackBar(
+             SnackBar(content: Text('Invalid registration number format: $registrationNumber'), backgroundColor: Colors.red)
+          );
+       }
+       return false;
+    }
+
+    try {
+      final AttendanceRecord checkedInRecord = await apiService.checkInStudent(
+        lecture.id,
+        registrationNumber, // Pass validated registration number
+      );
+      // Use the passed context (could be dialog or dashboard)
+      if (!currentContext.mounted) return false; // Check context before using
+      ScaffoldMessenger.of(currentContext).showSnackBar(
+         SnackBar(
+            content: Text('Student ${checkedInRecord.studentName} (${checkedInRecord.registrationNumber}) checked in!'),
+            backgroundColor: Colors.green
+         )
+      );
+      return true; // Indicate success
+    } catch (e) {
+       if (!currentContext.mounted) return false; // Check context before using
+       String errorMessage = 'Check-in failed: An unknown error occurred.';
+       if (e is Exception) {
+          // Try to get a cleaner message from the exception
+          errorMessage = 'Check-in failed: ${e.toString().replaceFirst("Exception: ", "")}';
+       }
+       ScaffoldMessenger.of(currentContext).showSnackBar(
+          SnackBar(content: Text(errorMessage), backgroundColor: Colors.red)
+       );
+       return false; // Indicate failure
+    }
+  }
+
+
+  // --- Manual Check-In Dialog ---
   void showCheckInDialog(Lecture lecture) {
     final registrationNumberController = TextEditingController();
-    bool isCheckingIn = false;
-    // Define the allowed characters regex consistent with register_screen.dart
-    final RegExp allowedRegNumChars = RegExp(r'^[A-Z0-9/-]+$');
+    bool isCheckingIn = false; // State specific to this dialog instance
 
     showDialog(
       context: context,
@@ -103,7 +149,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
           builder: (context, setDialogState) {
             return AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), // Rounded corners
-              title: Text('Check-In: ${lecture.unitName}'),
+              title: Text('Manual Check-In: ${lecture.unitName}'),
               content: TextField(
                 controller: registrationNumberController,
                 decoration: InputDecoration( // Apply consistent decoration
@@ -122,15 +168,32 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   filled: true,
                   fillColor: Colors.grey[50],
                 ),
-                // --- ADDED INPUT FORMATTERS ---
                 inputFormatters: [
                   UpperCaseTextFormatter(), // Ensure uppercase
                   FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9/-]')), // Allow only valid chars
                 ],
-                // --- END ADDED INPUT FORMATTERS ---
                 keyboardType: TextInputType.text, // Keep as text
                 textCapitalization: TextCapitalization.characters, // Suggest uppercase (redundant with formatter but good UX)
                 autofocus: true,
+                // Submit on keyboard done action
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) async {
+                   if (isCheckingIn) return; // Prevent submission while already processing
+                   final registrationNumber = registrationNumberController.text.trim();
+                   if (registrationNumber.isEmpty) {
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                         SnackBar(content: Text('Please enter a registration number.'), backgroundColor: Colors.red)
+                      );
+                      return;
+                   }
+                   setDialogState(() => isCheckingIn = true);
+                   bool success = await _performCheckIn(registrationNumber, lecture, dialogContext);
+                   if (success && dialogContext.mounted) {
+                      Navigator.of(dialogContext).pop();
+                   } else if (dialogContext.mounted) {
+                      setDialogState(() => isCheckingIn = false);
+                   }
+                },
               ),
               actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
               actions: [
@@ -142,49 +205,27 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                 ElevatedButton(
                   // Disable button while checking in
                   onPressed: isCheckingIn ? null : () async {
-                    // Get the formatted (uppercase) registration number
                     final registrationNumber = registrationNumberController.text.trim();
 
-                    // --- ADDED VALIDATION ---
                     if (registrationNumber.isEmpty) {
-                      showSnackBar('Please enter a registration number.', isError: true);
+                      ScaffoldMessenger.of(dialogContext).showSnackBar(
+                         SnackBar(content: Text('Please enter a registration number.'), backgroundColor: Colors.red)
+                      );
                       return; // Keep dialog open
                     }
-                    // Validate allowed characters (safety check, formatters should handle most)
-                    if (!allowedRegNumChars.hasMatch(registrationNumber)) {
-                       showSnackBar('Registration number contains invalid characters.\nAllowed: A-Z, 0-9, /, -', isError: true);
-                       return; // Keep dialog open
-                    }
-                    // --- END ADDED VALIDATION ---
+                    // Validation moved inside _performCheckIn, but basic empty check is good here
 
                     setDialogState(() => isCheckingIn = true); // Show loading indicator
-                    try {
-                      // *** API CALL uses the validated registrationNumber ***
-                      final AttendanceRecord checkedInRecord = await apiService.checkInStudent(
-                        lecture.id,
-                        registrationNumber, // Pass validated registration number
-                      );
-                      // Check if dialog context is still mounted before interacting with it
-                      if (!dialogContext.mounted) return;
-                      Navigator.of(dialogContext).pop(); // Close dialog on success
-                      // Updated success message including student name and reg number
-                      showSnackBar('Student ${checkedInRecord.studentName} (${checkedInRecord.registrationNumber}) checked in successfully!', isError: false);
-                    } catch (e) {
-                       // Check if dialog context is still mounted before showing snackbar
-                       if (!dialogContext.mounted) return;
-                       // Don't pop the dialog on error, show error message
-                       // Extract specific error message if possible
-                       String errorMessage = 'Check-in failed: An unknown error occurred.';
-                       if (e is Exception) { // Check if it's a general Exception
-                          errorMessage = 'Check-in failed: ${e.toString().replaceFirst("Exception: ", "")}';
-                       }
-                       // Consider adding specific checks for ApiService exceptions if defined
-                       showSnackBar(errorMessage, isError: true);
-                    } finally {
-                       // Ensure loading state is reset if dialog is still mounted
-                       if (dialogContext.mounted) {
-                          setDialogState(() => isCheckingIn = false);
-                       }
+
+                    // Call the refactored check-in logic, passing the dialog's context
+                    bool success = await _performCheckIn(registrationNumber, lecture, dialogContext);
+
+                    // Pop dialog ONLY on success
+                    if (success && dialogContext.mounted) {
+                       Navigator.of(dialogContext).pop();
+                    } else if (dialogContext.mounted) {
+                       // Reset loading state on failure if dialog is still mounted
+                       setDialogState(() => isCheckingIn = false);
                     }
                   },
                   style: ElevatedButton.styleFrom( // Style primary action button
@@ -193,7 +234,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
-                  // Show progress indicator or text based on isCheckingIn state
                   child: isCheckingIn
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Text('Check In'),
@@ -205,6 +245,41 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
       },
     );
   }
+
+  // --- Function to handle QR Code Scan Initiation ---
+  Future<void> _scanQrCodeAndCheckIn(Lecture lecture) async {
+    if (!mounted || _isCheckingInViaQr) return; // Prevent if already scanning/checking in
+
+    // Navigate to the scanner screen and wait for a result
+    final String? scannedRegNum = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (context) => const QrScannerScreen()),
+    );
+
+    if (!mounted) return; // Check again after await
+
+    if (scannedRegNum != null && scannedRegNum.isNotEmpty) {
+      print("Scanned Registration Number: $scannedRegNum"); // Debug log
+      final String processedRegNum = scannedRegNum.trim().toUpperCase(); // Trim and uppercase
+
+      // Show loading indicator on the dashboard
+      setState(() { _isCheckingInViaQr = true; });
+
+      // Perform check-in using the scanned number
+      // Pass the main dashboard context for the snackbar
+      await _performCheckIn(processedRegNum, lecture, context);
+
+      // Hide loading indicator regardless of success/failure
+      if (mounted) {
+         setState(() { _isCheckingInViaQr = false; });
+      }
+    } else {
+      // Optional: Show a message if scanning was cancelled or no data found
+      // showSnackBar('QR code scanning cancelled or no data found.', isError: true);
+      print("QR Scan cancelled or returned empty.");
+    }
+  }
+
 
   @override
   void dispose() {
@@ -224,15 +299,23 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
         foregroundColor: Colors.white, // Ensure text/icons are white
         elevation: 2.0, // Consistent elevation
         actions: [
+          // --- Show loading indicator in AppBar if checking in via QR ---
+          if (_isCheckingInViaQr)
+             Padding(
+               padding: const EdgeInsets.only(right: 15.0),
+               child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))),
+             ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh Lectures',
-            onPressed: loadLectures, // Refresh action
+            // Disable refresh while checking in via QR
+            onPressed: _isCheckingInViaQr ? null : loadLectures,
           ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Logout',
-            onPressed: () async {
+            // Disable logout while checking in via QR
+            onPressed: _isCheckingInViaQr ? null : () async {
               // Confirm logout action
               final confirm = await showDialog<bool>(
                 context: context,
@@ -272,7 +355,8 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.add_circle_outline),
               label: const Text('Create New Lecture'),
-              onPressed: showCreateLectureDialog, // Trigger the dialog
+              // Disable create button while checking in via QR
+              onPressed: _isCheckingInViaQr ? null : showCreateLectureDialog,
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 52), // Full width, standard height
                 backgroundColor: brandColor, // Use brand color
@@ -454,20 +538,39 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                // Check-in button - triggers the modified dialog
-                                ElevatedButton.icon(
-                                  icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-                                  label: const Text('Check-In'),
-                                  onPressed: () => showCheckInDialog(lecture), // Trigger check-in dialog
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: brandColor.withOpacity(0.15), // Lighter background
-                                    foregroundColor: brandColor, // Brand color text
-                                    elevation: 0, // No elevation
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), // Pill shape
-                                  ),
+
+                                // --- Action Buttons Column ---
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // Check-in button - triggers the modified dialog
+                                    ElevatedButton.icon(
+                                      icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+                                      label: const Text('Check-In'),
+                                      // Disable manual check-in while QR check-in is processing
+                                      onPressed: _isCheckingInViaQr ? null : () => showCheckInDialog(lecture),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: brandColor.withOpacity(0.15), // Lighter background
+                                        foregroundColor: brandColor, // Brand color text
+                                        elevation: 0, // No elevation
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), // Pill shape
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4), // Space between buttons
+                                    // --- QR Scan Button ---
+                                    IconButton(
+                                      icon: const Icon(Icons.qr_code_scanner),
+                                      tooltip: 'Scan QR Code',
+                                      color: brandColor.withOpacity(0.8),
+                                      iconSize: 26,
+                                      // Disable scan button while QR check-in is processing
+                                      onPressed: _isCheckingInViaQr ? null : () => _scanQrCodeAndCheckIn(lecture),
+                                    ),
+                                  ],
                                 ),
+                                // --- End Action Buttons Column ---
                               ],
                             ),
                           ),
