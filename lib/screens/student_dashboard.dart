@@ -26,12 +26,12 @@ class StudentDashboard extends StatefulWidget {
 
 class _StudentDashboardState extends State<StudentDashboard> {
   final ApiService apiService = ApiService();
+
+  // Lecture List State
   Future<List<Lecture>>? lecturesFuture;
   String? joinedLectureId; // Keep track of the lecture just joined for UI feedback
   bool isJoining = false; // Loading state for the manual join button/dialog
   String? _joiningLectureIdTemp; // Track which lecture is being joined manually
-
-  // --- Add QR Check-in State ---
   bool _isCheckingInViaQr = false; // Loading state for QR check-in process
 
   // Filter State
@@ -40,8 +40,15 @@ class _StudentDashboardState extends State<StudentDashboard> {
   String? fixedCourse;
   String? selectedYear;
   String? selectedSemester;
-
   bool initialFiltersApplied = false;
+
+  // --- Attendance Summary State ---
+  bool _isLoadingSummary = true;
+  String? _summaryError;
+  String? _attendancePercentage; // Store as String (e.g., "80.00")
+  int? _totalLectures;
+  int? _attendedLectures;
+  // --- End Attendance Summary State ---
 
   // Define the brand color (consistent styling)
   static const Color brandColor = Color(0xFF0175C2);
@@ -54,7 +61,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     fixedDepartment = widget.currentUser.department;
     fixedCourse = widget.currentUser.course;
 
-    // Check if the student has a registration number. If not, show an error and prevent further action.
+    // Check if the student has a registration number.
     if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
        WidgetsBinding.instance.addPostFrameCallback((_) {
          if (mounted) {
@@ -66,6 +73,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           showInitialFilterDialog();
+          // Also load the initial attendance summary
+          _loadAttendanceSummary(); // Load summary after potentially showing filter dialog
         }
       });
     }
@@ -113,33 +122,32 @@ class _StudentDashboardState extends State<StudentDashboard> {
   Future<void> showInitialFilterDialog() async {
     final initialData = LectureFilterData(
       school: fixedSchool, department: fixedDepartment, course: fixedCourse,
-      year: null, semester: null, // Start with null year/semester
+      year: null, semester: null,
     );
 
     final LectureFilterData? selectedFilters = await showDialog<LectureFilterData>(
       context: context,
-      barrierDismissible: false, // Prevent closing without selection
+      barrierDismissible: false,
       builder: (context) => LectureFilterDialog(
         initialFilters: initialData,
-        isInitialSelection: true, // Indicate this is the first mandatory selection
-        fixedSchool: fixedSchool, // Pass fixed values
+        isInitialSelection: true,
+        fixedSchool: fixedSchool,
         fixedDepartment: fixedDepartment,
         fixedCourse: fixedCourse,
       ),
     );
 
-    // If valid filters were selected, update state and load lectures.
     if (selectedFilters != null && selectedFilters.year != null && selectedFilters.semester != null && mounted) {
       setState(() {
         selectedYear = selectedFilters.year;
         selectedSemester = selectedFilters.semester;
-        initialFiltersApplied = true; // Mark that initial filters are set
+        initialFiltersApplied = true;
       });
       loadLectures(); // Load lectures based on the selected filters
+      // Reload summary as well, in case relevant lectures changed (though less likely needed here)
+      _loadAttendanceSummary();
     } else if (mounted) {
-      // Handle case where dialog was closed without selection (e.g., back button)
       if (kDebugMode) print("Initial filter dialog closed unexpectedly or without valid selection.");
-      // UI will show a placeholder message.
     }
   }
 
@@ -147,56 +155,103 @@ class _StudentDashboardState extends State<StudentDashboard> {
   Future<void> showRefineFilterDialog() async {
     final currentFilters = LectureFilterData(
       school: fixedSchool, department: fixedDepartment, course: fixedCourse,
-      year: selectedYear, semester: selectedSemester, // Pass current selections
+      year: selectedYear, semester: selectedSemester,
     );
 
     final LectureFilterData? selectedFilters = await showDialog<LectureFilterData>(
       context: context,
-      barrierDismissible: true, // Allow dismissing this time
+      barrierDismissible: true,
       builder: (context) => LectureFilterDialog(
         initialFilters: currentFilters,
-        isInitialSelection: false, // Indicate this is for refining
+        isInitialSelection: false,
         fixedSchool: fixedSchool,
         fixedDepartment: fixedDepartment,
         fixedCourse: fixedCourse,
       ),
     );
 
-    // If new filters were selected and they differ from current ones, update state and reload.
     if (selectedFilters != null && mounted) {
       if (selectedFilters.year != selectedYear || selectedFilters.semester != selectedSemester) {
         setState(() {
           selectedYear = selectedFilters.year;
           selectedSemester = selectedFilters.semester;
-          joinedLectureId = null; // Reset joined status when filters change
+          joinedLectureId = null;
         });
         loadLectures(); // Reload lectures with new filters
+        // Reload summary as filters might change the total relevant lectures
+        _loadAttendanceSummary();
       }
     }
   }
 
   // Load lectures based on the currently selected filters.
   void loadLectures() {
-    // Don't attempt to load if initial filters haven't been applied or are invalid.
     if (!initialFiltersApplied || selectedYear == null || selectedSemester == null) {
       if (lecturesFuture != null && mounted) {
          setState(() { lecturesFuture = null; });
       }
       return;
     }
-    if (!mounted) return; // Check if widget is still mounted
+    if (!mounted) return;
     setState(() {
-      joinedLectureId = null; // Reset joined status indicator on each load/refresh
-      // Call ApiService to get lectures matching the filters
+      joinedLectureId = null;
       lecturesFuture = apiService.getStudentLectures(
         fixedSchool, fixedDepartment, fixedCourse, selectedYear, selectedSemester,
       );
     });
   }
 
+  // --- Load Attendance Summary ---
+  Future<void> _loadAttendanceSummary() async {
+    // Don't load if user ID is missing (shouldn't happen if logged in)
+    if (!mounted || widget.currentUser.id.isEmpty) return;
+    // Don't load if registration number is missing, as summary might be irrelevant
+    if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
+        setState(() {
+            _isLoadingSummary = false;
+            _summaryError = "Registration number missing."; // Set specific error
+        });
+        return;
+    }
+
+    setState(() {
+      _isLoadingSummary = true;
+      _summaryError = null;
+    });
+    try {
+      // Call the ApiService method
+      final summaryData = await apiService.getStudentAttendanceSummary(widget.currentUser.id);
+      if (!mounted) return; // Check mount status after async gap
+
+      // Update state with fetched data
+      setState(() {
+        _attendancePercentage = summaryData['percentage'] as String?;
+        _totalLectures = summaryData['totalLectures'] as int?;
+        _attendedLectures = summaryData['attendedLectures'] as int?;
+        _isLoadingSummary = false;
+      });
+      print("Attendance Summary Loaded: $_attendancePercentage% ($_attendedLectures/$_totalLectures)");
+    } catch (e) {
+      if (!mounted) return; // Check mount status after async gap
+      print("Error loading attendance summary: $e");
+      setState(() {
+        // Store error message for display
+        _summaryError = e is ApiException ? e.message : e.toString();
+        _isLoadingSummary = false;
+        // Clear previous summary data on error
+        _attendancePercentage = null;
+        _totalLectures = null;
+        _attendedLectures = null;
+      });
+      // Optionally show snackbar, but error widget is often better
+      // showSnackBar('Failed to load attendance summary: $_summaryError', isError: true);
+    }
+  }
+  // --- End Load Attendance Summary ---
+
   // Show a confirmation dialog before joining a lecture manually.
   Future<void> showJoinLectureDialog(Lecture lecture) async {
-    final studentRegNum = widget.currentUser.registrationNumber;
+     final studentRegNum = widget.currentUser.registrationNumber;
     if (studentRegNum == null || studentRegNum.isEmpty) {
       showSnackBar('Error: Your registration number is missing. Cannot join lecture.', isError: true);
       return;
@@ -249,6 +304,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
       if (!mounted) return;
       setState(() { joinedLectureId = lecture.id; });
       showSnackBar('Successfully joined ${lecture.unitName}!', isError: false);
+      // Refresh summary after successful join
+      _loadAttendanceSummary();
     } catch (e) {
       if (!mounted) return;
       showSnackBar('Failed to join lecture: ${e.toString()}', isError: true);
@@ -259,64 +316,53 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   // --- Function to handle QR Code Scan and Check-In ---
   Future<void> _scanAndCheckIn() async {
-    // Prevent action if registration number is missing or already processing
-    if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
+     if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
        showSnackBar('Error: Your registration number is missing. Cannot check in.', isError: true);
        return;
     }
     if (_isCheckingInViaQr || isJoining) return;
 
-    // Navigate to the scanner screen and wait for a result (lectureId)
     final String? scannedLectureId = await Navigator.push<String>(
       context,
       MaterialPageRoute(builder: (context) => const QrScannerScreen()),
     );
 
-    if (!mounted) return; // Check again after await
+    if (!mounted) return;
 
     if (scannedLectureId != null && scannedLectureId.isNotEmpty) {
-      print("Scanned Lecture ID: $scannedLectureId"); // Debug log
+      print("Scanned Lecture ID: $scannedLectureId");
 
-      // Show loading indicator
       setState(() { _isCheckingInViaQr = true; });
 
       try {
-        // Call the existing joinLecture method, passing the scanned lecture ID
         final AttendanceRecord attendanceRecord = await apiService.joinLecture(scannedLectureId);
 
-        if (!mounted) return; // Check mount status after async gap
+        if (!mounted) return;
 
-        // Update UI: Mark the specific lecture as joined/checked-in if it's currently displayed
         setState(() {
-           joinedLectureId = scannedLectureId; // Mark for potential UI update in list builder
+           joinedLectureId = scannedLectureId;
         });
 
-        // Find lecture name for better feedback (optional, requires searching the list)
-        String lectureName = "lecture"; // Default
+        String lectureName = "lecture";
         if (lecturesFuture != null) {
            try {
-              // Await the future to get the list if it's not already completed
               final lectures = await lecturesFuture;
-              // --- CORRECTED: Use firstWhereOrNull ---
               final Lecture? foundLecture = lectures?.firstWhereOrNull(
                   (l) => l.id == scannedLectureId
               );
-              // --- END CORRECTION ---
-              // Check if foundLecture is not null before accessing its properties
               if (foundLecture != null) {
                  lectureName = "'${foundLecture.unitName}'";
               }
-           } catch (_) { /* Ignore error if future fails here, use default name */ }
+           } catch (_) { /* Ignore */ }
         }
         showSnackBar('Successfully checked in for $lectureName!', isError: false);
-        // Optionally refresh the list if the backend might filter out joined lectures
-        // loadLectures();
+        // Refresh summary after successful QR check-in
+        _loadAttendanceSummary();
 
       } catch (e) {
-        if (!mounted) return; // Check mount status after async gap
+        if (!mounted) return;
         showSnackBar('QR Check-in failed: ${e.toString()}', isError: true);
       } finally {
-        // Hide loading indicator regardless of success/failure
         if (mounted) {
           setState(() { _isCheckingInViaQr = false; });
         }
@@ -329,7 +375,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   // Helper to show snackbar messages.
   void showSnackBar(String message, {bool isError = false}) {
-     if (!mounted) return;
+      if (!mounted) return;
      ScaffoldMessenger.of(context).showSnackBar(
        SnackBar(
          content: Text(message),
@@ -341,11 +387,143 @@ class _StudentDashboardState extends State<StudentDashboard> {
      );
   }
 
+  // --- Widget to Build Attendance Summary Card ---
+  Widget _buildAttendanceSummaryCard() {
+    // Handle loading state
+    if (_isLoadingSummary) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0), // Added horizontal padding
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: brandColor)),
+      );
+    }
+
+    // Handle error state
+    if (_summaryError != null) {
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: Colors.red.shade50,
+        elevation: 1, // Reduced elevation for error
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            children: [
+              Icon(Icons.error_outline, color: Colors.red.shade700),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Could not load attendance summary: $_summaryError',
+                  style: TextStyle(color: Colors.red.shade900),
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.refresh, color: Colors.red.shade700),
+                tooltip: 'Retry Loading Summary',
+                onPressed: _loadAttendanceSummary,
+                padding: EdgeInsets.zero, // Compact button
+                constraints: const BoxConstraints(), // Compact button
+              )
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Handle state where data hasn't loaded or is unavailable (e.g., 0 total lectures)
+    if (_attendancePercentage == null || _attendedLectures == null || _totalLectures == null) {
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: 1,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row( // Use row for better alignment
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.info_outline, color: Colors.grey.shade500),
+              const SizedBox(width: 10),
+              Text(
+                'Attendance summary is currently unavailable.',
+                style: TextStyle(color: Colors.grey.shade600),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // --- Build the actual summary card ---
+    double percentageValue = double.tryParse(_attendancePercentage!) ?? 0.0;
+    // Clamp value between 0.0 and 1.0 for LinearProgressIndicator
+    double progressValue = (percentageValue / 100.0).clamp(0.0, 1.0);
+    // Determine color based on percentage
+    Color progressColor = percentageValue >= 75 ? Colors.green.shade600 : (percentageValue >= 50 ? Colors.orange.shade700 : Colors.red.shade600);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias, // Ensures progress bar respects rounded corners
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Attendance Summary',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: brandColor),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end, // Align text baselines
+              children: [
+                // Use Flexible to prevent overflow if counts are large
+                Flexible(
+                  child: Text(
+                    // Display 0 if total is 0 to avoid division by zero display issues
+                    _totalLectures == 0
+                        ? '0 / 0 Lectures Attended'
+                        : '$_attendedLectures / $_totalLectures Lectures Attended',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    overflow: TextOverflow.ellipsis, // Handle potential overflow
+                  ),
+                ),
+                const SizedBox(width: 10), // Add spacing
+                Text(
+                  '${_attendancePercentage!}%',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith( // Slightly larger percentage
+                        fontWeight: FontWeight.bold,
+                        color: progressColor, // Use determined color
+                      ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Use ClipRRect for cleaner rounded corners on the progress bar itself
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progressValue,
+                backgroundColor: Colors.grey.shade300,
+                valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+                minHeight: 8,
+                // borderRadius: BorderRadius.circular(4), // Already handled by ClipRRect
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // --- End Attendance Summary Card Widget ---
+
+
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context, listen: false);
     final textTheme = Theme.of(context).textTheme;
-    // Determine if student can perform actions (based on registration number existence).
     final bool canPerformActions = widget.currentUser.registrationNumber != null && widget.currentUser.registrationNumber!.isNotEmpty;
 
     return Scaffold(
@@ -355,30 +533,30 @@ class _StudentDashboardState extends State<StudentDashboard> {
         foregroundColor: Colors.white,
         elevation: 2.0,
         actions: [
-           // --- Show loading indicator in AppBar if checking in via QR ---
            if (_isCheckingInViaQr)
              const Padding(
                padding: EdgeInsets.only(right: 15.0),
                child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))),
              ),
-           // Button to refine filters. Disabled if initial filters not set or cannot perform actions.
            IconButton(
              icon: Icon(Icons.edit_calendar_outlined, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
              tooltip: 'Change Year/Semester',
              onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr ? showRefineFilterDialog : null,
            ),
-           // Button to refresh lectures. Disabled if initial filters not set or cannot perform actions.
            IconButton(
              icon: Icon(Icons.refresh, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
-             tooltip: 'Refresh Lectures',
-             onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr ? loadLectures : null,
+             tooltip: 'Refresh Lectures & Summary', // Updated tooltip
+             onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr
+               ? () async { // Combine refresh actions
+                   loadLectures(); // Trigger lecture reload (updates Future)
+                   await _loadAttendanceSummary(); // Await summary reload
+                 }
+               : null,
            ),
-           // Logout button. Disabled if checking in.
            IconButton(
              icon: const Icon(Icons.logout),
              tooltip: 'Logout',
              onPressed: _isCheckingInViaQr ? null : () async {
-                // Show confirmation dialog before logging out.
                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (context) => AlertDialog(
@@ -395,39 +573,37 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     ],
                   ),
                 ) ?? false;
-                // If confirmed, perform logout and navigate to WelcomeScreen.
                 if (confirm && mounted) {
                   await authService.logout();
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (context) => const WelcomeScreen()),
-                    (Route<dynamic> route) => false, // Remove all previous routes
-                  );
+                  Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
                 }
              },
            ),
         ],
       ),
-      // --- Add Floating Action Button for QR Scan ---
-      floatingActionButton: canPerformActions // Only show FAB if student can perform actions
+      floatingActionButton: canPerformActions
           ? FloatingActionButton.extended(
-              onPressed: _isCheckingInViaQr ? null : _scanAndCheckIn, // Disable while processing
+              onPressed: _isCheckingInViaQr ? null : _scanAndCheckIn,
               label: const Text('Scan QR'),
               icon: const Icon(Icons.qr_code_scanner),
               backgroundColor: brandColor,
               foregroundColor: Colors.white,
               tooltip: 'Scan Lecture QR Code to Check-In',
             )
-          : null, // Don't show FAB if reg number is missing
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat, // Position FAB
-      // --- End FAB ---
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // --- Display Attendance Summary Card ---
+          if (canPerformActions) // Only show summary if user can perform actions
+             _buildAttendanceSummaryCard(),
+          // --- End Attendance Summary Card ---
+
           // Display selected filters if they have been applied.
           if (initialFiltersApplied && canPerformActions) ...[
             Padding(
-              padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 8.0),
+              padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 8.0), // Adjusted padding
               child: Text(
                 "Available Lectures",
                 style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w500, color: brandColor),
@@ -453,9 +629,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 // If filters are applied and student can join, show lecture list.
                 ? RefreshIndicator(
                     color: brandColor,
-                    onRefresh: () async => loadLectures(), // Enable pull-to-refresh
+                    // Updated onRefresh to include summary reload
+                    onRefresh: () async {
+                       loadLectures();
+                       await _loadAttendanceSummary();
+                    },
                     child: FutureBuilder<List<Lecture>>(
-                      future: lecturesFuture, // Use the future holding lecture data
+                      future: lecturesFuture,
                       builder: (context, snapshot) {
                         // Loading state
                         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -493,7 +673,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
                         // --- Success: Display Lecture List ---
                         final lectures = snapshot.data!;
-                        // Sort lectures: Earliest start time first (ascending)
                         lectures.sort((a, b) {
                           final aTime = a.startTime; final bTime = b.startTime;
                           if (aTime == null && bTime == null) return 0;
@@ -501,9 +680,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           return aTime.compareTo(bTime);
                         });
 
-                        // Build the list view
                         return ListView.builder(
-                           physics: const AlwaysScrollableScrollPhysics(), // Ensure scrolling for RefreshIndicator
+                           physics: const AlwaysScrollableScrollPhysics(),
                            padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 80), // Add bottom padding for FAB
                            itemCount: lectures.length,
                            itemBuilder: (context, index) {
