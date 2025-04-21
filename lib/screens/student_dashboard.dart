@@ -29,10 +29,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   // Lecture List State
   Future<List<Lecture>>? lecturesFuture;
-  String? joinedLectureId; // Keep track of the lecture just joined for UI feedback
-  bool isJoining = false; // Loading state for the manual join button/dialog
-  String? _joiningLectureIdTemp; // Track which lecture is being joined manually
-  bool _isCheckingInViaQr = false; // Loading state for QR check-in process
+  // Unified loading state: Tracks the ID of the lecture being processed (join or check-in)
+  String? _processingLectureId;
 
   // Filter State
   String? fixedSchool;
@@ -48,6 +46,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
   String? _attendancePercentage; // Store as String (e.g., "80.00")
   int? _totalLectures;
   int? _attendedLectures;
+  // *** Store the detailed records from the summary ***
+  List<AttendanceRecord>? _summaryAttendanceRecords;
   // --- End Attendance Summary State ---
 
   // Define the brand color (consistent styling)
@@ -144,7 +144,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
         initialFiltersApplied = true;
       });
       loadLectures(); // Load lectures based on the selected filters
-      // Reload summary as well, in case relevant lectures changed (though less likely needed here)
+      // Reload summary as well, in case relevant lectures changed
       _loadAttendanceSummary();
     } else if (mounted) {
       if (kDebugMode) print("Initial filter dialog closed unexpectedly or without valid selection.");
@@ -175,7 +175,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
         setState(() {
           selectedYear = selectedFilters.year;
           selectedSemester = selectedFilters.semester;
-          joinedLectureId = null;
+          // Clear summary records when filters change, they will be reloaded
+          _summaryAttendanceRecords = null;
         });
         loadLectures(); // Reload lectures with new filters
         // Reload summary as filters might change the total relevant lectures
@@ -194,22 +195,21 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
     if (!mounted) return;
     setState(() {
-      joinedLectureId = null;
+      // Don't clear joinedLectureId here, rely on _summaryAttendanceRecords
       lecturesFuture = apiService.getStudentLectures(
         fixedSchool, fixedDepartment, fixedCourse, selectedYear, selectedSemester,
       );
     });
   }
 
-  // --- Load Attendance Summary ---
+  // --- Load Attendance Summary (Modified) ---
   Future<void> _loadAttendanceSummary() async {
-    // Don't load if user ID is missing (shouldn't happen if logged in)
     if (!mounted || widget.currentUser.id.isEmpty) return;
-    // Don't load if registration number is missing, as summary might be irrelevant
     if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
         setState(() {
             _isLoadingSummary = false;
-            _summaryError = "Registration number missing."; // Set specific error
+            _summaryError = "Registration number missing.";
+            _summaryAttendanceRecords = null; // Clear records on error
         });
         return;
     }
@@ -219,35 +219,71 @@ class _StudentDashboardState extends State<StudentDashboard> {
       _summaryError = null;
     });
     try {
-      // Call the ApiService method
       final summaryData = await apiService.getStudentAttendanceSummary(widget.currentUser.id);
-      if (!mounted) return; // Check mount status after async gap
+      if (!mounted) return;
 
-      // Update state with fetched data
       setState(() {
         _attendancePercentage = summaryData['percentage'] as String?;
         _totalLectures = summaryData['totalLectures'] as int?;
         _attendedLectures = summaryData['attendedLectures'] as int?;
+        // *** Store the fetched records ***
+        _summaryAttendanceRecords = summaryData['attendanceRecords'] as List<AttendanceRecord>?;
         _isLoadingSummary = false;
       });
-      print("Attendance Summary Loaded: $_attendancePercentage% ($_attendedLectures/$_totalLectures)");
+      print("Attendance Summary Loaded: $_attendancePercentage% ($_attendedLectures/$_totalLectures). Records: ${_summaryAttendanceRecords?.length ?? 0}");
     } catch (e) {
-      if (!mounted) return; // Check mount status after async gap
+      if (!mounted) return;
       print("Error loading attendance summary: $e");
       setState(() {
-        // Store error message for display
         _summaryError = e is ApiException ? e.message : e.toString();
         _isLoadingSummary = false;
-        // Clear previous summary data on error
         _attendancePercentage = null;
         _totalLectures = null;
         _attendedLectures = null;
+        _summaryAttendanceRecords = null; // Clear records on error
       });
-      // Optionally show snackbar, but error widget is often better
-      // showSnackBar('Failed to load attendance summary: $_summaryError', isError: true);
     }
   }
   // --- End Load Attendance Summary ---
+
+  // --- Handle Student Joining a Lecture (Manual Button) ---
+  Future<void> _handleStudentJoin(Lecture lecture) async {
+    final studentRegNum = widget.currentUser.registrationNumber;
+    if (studentRegNum == null || studentRegNum.isEmpty) {
+      showSnackBar('Error: Your registration number is missing. Cannot join lecture.', isError: true);
+      return;
+    }
+    // Prevent concurrent operations
+    if (_processingLectureId != null) return;
+
+    setState(() { _processingLectureId = lecture.id; });
+
+    try {
+      // Call the joinLecture API - Backend now handles setting checkedIn=false
+      final AttendanceRecord attendanceRecord = await apiService.joinLecture(lecture.id);
+      if (!mounted) return;
+
+      // Update local state immediately for UI feedback (or rely on refresh)
+      // Option 1: Refresh summary (safer for consistency)
+      await _loadAttendanceSummary(); // Refresh summary to get the updated record list
+
+      showSnackBar('Successfully joined ${lecture.unitName}!', isError: false);
+
+    } catch (e) {
+      if (!mounted) return;
+      // Check for specific error messages from backend if needed
+      if (e is ApiException && e.statusCode == 409) { // Example: Conflict/Already Joined
+         showSnackBar('You have already joined ${lecture.unitName}.', isError: false);
+         // Optionally refresh summary if state might be stale
+         await _loadAttendanceSummary();
+      } else {
+         showSnackBar('Failed to join lecture: ${e.toString()}', isError: true);
+      }
+    } finally {
+      if (mounted) { setState(() { _processingLectureId = null; }); }
+    }
+  }
+
 
   // Show a confirmation dialog before joining a lecture manually.
   Future<void> showJoinLectureDialog(Lecture lecture) async {
@@ -256,9 +292,16 @@ class _StudentDashboardState extends State<StudentDashboard> {
       showSnackBar('Error: Your registration number is missing. Cannot join lecture.', isError: true);
       return;
     }
-    if (isJoining || _isCheckingInViaQr) return; // Prevent if already processing
+    // Check if already processing this or another lecture
+    if (_processingLectureId != null) return;
 
-    setState(() { isJoining = true; _joiningLectureIdTemp = lecture.id; });
+    // Check if already joined or checked in based on local state
+    final currentRecord = _summaryAttendanceRecords?.firstWhereOrNull((r) => r.lectureId == lecture.id);
+    if (currentRecord != null) {
+       // *** Use checkedIn instead of isCheckedIn ***
+       showSnackBar(currentRecord.checkedIn ? 'You are already checked in for this lecture.' : 'You have already joined this lecture.', isError: false);
+       return;
+    }
 
     final confirmed = await showDialog<bool>(
       context: context, barrierDismissible: false,
@@ -293,34 +336,20 @@ class _StudentDashboardState extends State<StudentDashboard> {
       },
     );
 
-    if (confirmed != true) {
-       if (mounted) { setState(() { isJoining = false; _joiningLectureIdTemp = null; }); }
-       return;
-    }
-
-    try {
-      // Use the existing joinLecture API call
-      final AttendanceRecord attendanceRecord = await apiService.joinLecture(lecture.id);
-      if (!mounted) return;
-      setState(() { joinedLectureId = lecture.id; });
-      showSnackBar('Successfully joined ${lecture.unitName}!', isError: false);
-      // Refresh summary after successful join
-      _loadAttendanceSummary();
-    } catch (e) {
-      if (!mounted) return;
-      showSnackBar('Failed to join lecture: ${e.toString()}', isError: true);
-    } finally {
-      if (mounted) { setState(() { isJoining = false; _joiningLectureIdTemp = null; }); }
+    if (confirmed == true && mounted) {
+       // Call the unified join handler
+       await _handleStudentJoin(lecture);
     }
   }
 
-  // --- Function to handle QR Code Scan and Check-In ---
-  Future<void> _scanAndCheckIn() async {
+  // --- Function to handle QR Code Scan (Student scans Lecture QR for CHECK-IN) ---
+  Future<void> _scanLectureQrAndCheckIn() async {
      if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
-       showSnackBar('Error: Your registration number is missing. Cannot check in.', isError: true);
+       showSnackBar('Error: Your registration number is missing. Cannot check in via QR.', isError: true);
        return;
     }
-    if (_isCheckingInViaQr || isJoining) return;
+    // Prevent concurrent operations
+    if (_processingLectureId != null) return;
 
     final String? scannedLectureId = await Navigator.push<String>(
       context,
@@ -330,41 +359,43 @@ class _StudentDashboardState extends State<StudentDashboard> {
     if (!mounted) return;
 
     if (scannedLectureId != null && scannedLectureId.isNotEmpty) {
-      print("Scanned Lecture ID: $scannedLectureId");
-
-      setState(() { _isCheckingInViaQr = true; });
+      print("Scanned Lecture ID for Check-In: $scannedLectureId");
+      setState(() { _processingLectureId = scannedLectureId; }); // Indicate processing for this lecture
 
       try {
-        final AttendanceRecord attendanceRecord = await apiService.joinLecture(scannedLectureId);
-
+        // *** Call the NEW API endpoint for student check-in via lecture QR ***
+        final AttendanceRecord attendanceRecord = await apiService.checkInViaLectureQr(scannedLectureId);
         if (!mounted) return;
 
-        setState(() {
-           joinedLectureId = scannedLectureId;
-        });
+        // Refresh summary to get the updated record list (including checkedIn=true)
+        await _loadAttendanceSummary();
 
+        // Find lecture name for snackbar message (best effort)
         String lectureName = "lecture";
         if (lecturesFuture != null) {
            try {
               final lectures = await lecturesFuture;
-              final Lecture? foundLecture = lectures?.firstWhereOrNull(
-                  (l) => l.id == scannedLectureId
-              );
-              if (foundLecture != null) {
-                 lectureName = "'${foundLecture.unitName}'";
-              }
-           } catch (_) { /* Ignore */ }
+              final Lecture? foundLecture = lectures?.firstWhereOrNull((l) => l.id == scannedLectureId);
+              if (foundLecture != null) { lectureName = "'${foundLecture.unitName}'"; }
+           } catch (_) { /* Ignore if future failed */ }
         }
         showSnackBar('Successfully checked in for $lectureName!', isError: false);
-        // Refresh summary after successful QR check-in
-        _loadAttendanceSummary();
 
       } catch (e) {
         if (!mounted) return;
-        showSnackBar('QR Check-in failed: ${e.toString()}', isError: true);
+        // Handle specific errors from the new API endpoint
+        if (e is ApiException && (e.statusCode == 400 || e.statusCode == 404)) {
+           showSnackBar('Check-in failed: You must join the lecture first.', isError: true);
+        } else if (e is ApiException && e.statusCode == 409) {
+           showSnackBar('Check-in failed: You are already checked in.', isError: true);
+           // Optionally refresh summary if state might be stale
+           await _loadAttendanceSummary();
+        } else {
+           showSnackBar('QR Check-in failed: ${e.toString()}', isError: true);
+        }
       } finally {
         if (mounted) {
-          setState(() { _isCheckingInViaQr = false; });
+          setState(() { _processingLectureId = null; }); // Reset processing flag
         }
       }
     } else {
@@ -392,7 +423,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     // Handle loading state
     if (_isLoadingSummary) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0), // Added horizontal padding
+        padding: EdgeInsets.symmetric(vertical: 20.0, horizontal: 16.0),
         child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: brandColor)),
       );
     }
@@ -402,7 +433,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
       return Card(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         color: Colors.red.shade50,
-        elevation: 1, // Reduced elevation for error
+        elevation: 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -420,8 +451,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 icon: Icon(Icons.refresh, color: Colors.red.shade700),
                 tooltip: 'Retry Loading Summary',
                 onPressed: _loadAttendanceSummary,
-                padding: EdgeInsets.zero, // Compact button
-                constraints: const BoxConstraints(), // Compact button
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               )
             ],
           ),
@@ -429,7 +460,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
       );
     }
 
-    // Handle state where data hasn't loaded or is unavailable (e.g., 0 total lectures)
+    // Handle state where data hasn't loaded or is unavailable
     if (_attendancePercentage == null || _attendedLectures == null || _totalLectures == null) {
       return Card(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -437,7 +468,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Row( // Use row for better alignment
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.info_outline, color: Colors.grey.shade500),
@@ -455,16 +486,14 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
     // --- Build the actual summary card ---
     double percentageValue = double.tryParse(_attendancePercentage!) ?? 0.0;
-    // Clamp value between 0.0 and 1.0 for LinearProgressIndicator
     double progressValue = (percentageValue / 100.0).clamp(0.0, 1.0);
-    // Determine color based on percentage
     Color progressColor = percentageValue >= 75 ? Colors.green.shade600 : (percentageValue >= 50 ? Colors.orange.shade700 : Colors.red.shade600);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      clipBehavior: Clip.antiAlias, // Ensures progress bar respects rounded corners
+      clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -477,31 +506,28 @@ class _StudentDashboardState extends State<StudentDashboard> {
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end, // Align text baselines
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Use Flexible to prevent overflow if counts are large
                 Flexible(
                   child: Text(
-                    // Display 0 if total is 0 to avoid division by zero display issues
                     _totalLectures == 0
                         ? '0 / 0 Lectures Attended'
                         : '$_attendedLectures / $_totalLectures Lectures Attended',
                     style: Theme.of(context).textTheme.bodyMedium,
-                    overflow: TextOverflow.ellipsis, // Handle potential overflow
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: 10), // Add spacing
+                const SizedBox(width: 10),
                 Text(
                   '${_attendancePercentage!}%',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith( // Slightly larger percentage
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.bold,
-                        color: progressColor, // Use determined color
+                        color: progressColor,
                       ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            // Use ClipRRect for cleaner rounded corners on the progress bar itself
             ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
@@ -509,7 +535,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 backgroundColor: Colors.grey.shade300,
                 valueColor: AlwaysStoppedAnimation<Color>(progressColor),
                 minHeight: 8,
-                // borderRadius: BorderRadius.circular(4), // Already handled by ClipRRect
               ),
             ),
           ],
@@ -528,36 +553,42 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Student Dashboard - ${widget.currentUser.name}', style: const TextStyle(fontSize: 18)),
-        backgroundColor: brandColor,
-        foregroundColor: Colors.white,
-        elevation: 2.0,
-        actions: [
-           if (_isCheckingInViaQr)
-             const Padding(
-               padding: EdgeInsets.only(right: 15.0),
-               child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))),
-             ),
-           IconButton(
-             icon: Icon(Icons.edit_calendar_outlined, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
-             tooltip: 'Change Year/Semester',
-             onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr ? showRefineFilterDialog : null,
-           ),
-           IconButton(
-             icon: Icon(Icons.refresh, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
-             tooltip: 'Refresh Lectures & Summary', // Updated tooltip
-             onPressed: initialFiltersApplied && canPerformActions && !_isCheckingInViaQr
-               ? () async { // Combine refresh actions
-                   loadLectures(); // Trigger lecture reload (updates Future)
-                   await _loadAttendanceSummary(); // Await summary reload
-                 }
-               : null,
-           ),
-           IconButton(
-             icon: const Icon(Icons.logout),
-             tooltip: 'Logout',
-             onPressed: _isCheckingInViaQr ? null : () async {
-                final confirm = await showDialog<bool>(
+         title: Text('Student Dashboard - ${widget.currentUser.name}', style: const TextStyle(fontSize: 18)),
+         backgroundColor: brandColor,
+         foregroundColor: Colors.white,
+         elevation: 2.0,
+         actions: [
+            // Show loading indicator if joining/scanning
+            if (_processingLectureId != null) // Unified loading indicator
+              const Padding(
+                padding: EdgeInsets.only(right: 15.0),
+                child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))),
+              ),
+            IconButton(
+              icon: Icon(Icons.edit_calendar_outlined, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
+              tooltip: 'Change Year/Semester',
+              // Disable if processing
+              onPressed: initialFiltersApplied && canPerformActions && _processingLectureId == null
+                         ? showRefineFilterDialog
+                         : null,
+            ),
+            IconButton(
+              icon: Icon(Icons.refresh, color: initialFiltersApplied && canPerformActions ? Colors.white : Colors.white54),
+              tooltip: 'Refresh Lectures & Summary',
+              // Disable if processing
+              onPressed: initialFiltersApplied && canPerformActions && _processingLectureId == null
+                ? () async {
+                    loadLectures();
+                    await _loadAttendanceSummary();
+                  }
+                : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Logout',
+              // Disable if processing
+              onPressed: (_processingLectureId != null) ? null : () async {
+                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (context) => AlertDialog(
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -577,17 +608,19 @@ class _StudentDashboardState extends State<StudentDashboard> {
                   await authService.logout();
                   Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
                 }
-             },
-           ),
-        ],
+              },
+            ),
+         ],
       ),
       floatingActionButton: canPerformActions
           ? FloatingActionButton.extended(
-              onPressed: _isCheckingInViaQr ? null : _scanAndCheckIn,
+              // *** Use the updated QR scan function for CHECK-IN ***
+              onPressed: (_processingLectureId != null) ? null : _scanLectureQrAndCheckIn,
               label: const Text('Scan QR'),
               icon: const Icon(Icons.qr_code_scanner),
               backgroundColor: brandColor,
               foregroundColor: Colors.white,
+              // *** Updated tooltip ***
               tooltip: 'Scan Lecture QR Code to Check-In',
             )
           : null,
@@ -596,14 +629,14 @@ class _StudentDashboardState extends State<StudentDashboard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // --- Display Attendance Summary Card ---
-          if (canPerformActions) // Only show summary if user can perform actions
+          if (canPerformActions)
              _buildAttendanceSummaryCard(),
           // --- End Attendance Summary Card ---
 
           // Display selected filters if they have been applied.
           if (initialFiltersApplied && canPerformActions) ...[
             Padding(
-              padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 8.0), // Adjusted padding
+              padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 8.0),
               child: Text(
                 "Available Lectures",
                 style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w500, color: brandColor),
@@ -611,7 +644,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-              child: Wrap( // Use Wrap for filter chips
+              child: Wrap(
                 spacing: 8.0, runSpacing: 4.0,
                 children: [
                   if (selectedYear != null) Chip(label: Text('Year: $selectedYear'), backgroundColor: brandColor.withOpacity(0.1), side: BorderSide.none),
@@ -626,10 +659,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
           // Main content area: Either lecture list or placeholder message.
           Expanded(
             child: initialFiltersApplied && canPerformActions
-                // If filters are applied and student can join, show lecture list.
                 ? RefreshIndicator(
                     color: brandColor,
-                    // Updated onRefresh to include summary reload
                     onRefresh: () async {
                        loadLectures();
                        await _loadAttendanceSummary();
@@ -657,7 +688,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                              ], ), )
                           );
                         }
-                        // Empty state (no lectures found for filters)
+                        // Empty state
                         if (!snapshot.hasData || snapshot.data!.isEmpty) {
                           return LayoutBuilder(
                              builder: (context, constraints) { return SingleChildScrollView( physics: const AlwaysScrollableScrollPhysics(), child: ConstrainedBox( constraints: BoxConstraints(minHeight: constraints.maxHeight), child: Center( child: Padding( padding: const EdgeInsets.all(20.0), child: Column(
@@ -671,13 +702,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           );
                         }
 
-                        // --- Success: Display Lecture List ---
+                        // --- Success: Display Lecture List (Modified Trailing Widget Logic) ---
                         final lectures = snapshot.data!;
                         lectures.sort((a, b) {
-                          final aTime = a.startTime; final bTime = b.startTime;
-                          if (aTime == null && bTime == null) return 0;
-                          if (aTime == null) return 1; if (bTime == null) return -1;
-                          return aTime.compareTo(bTime);
+                           final aTime = a.startTime; final bTime = b.startTime;
+                           if (aTime == null && bTime == null) return 0;
+                           if (aTime == null) return 1; if (bTime == null) return -1;
+                           return aTime.compareTo(bTime);
                         });
 
                         return ListView.builder(
@@ -686,12 +717,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
                            itemCount: lectures.length,
                            itemBuilder: (context, index) {
                               final lecture = lectures[index];
-                              // Check if this lecture was the one just successfully joined/checked-in.
-                              final bool isSuccessfullyJoined = lecture.id == joinedLectureId;
-                              // Check if this specific lecture is currently being joined manually.
-                              final bool isCurrentlyJoiningManually = isJoining && _joiningLectureIdTemp == lecture.id;
+                              // *** Determine status based on _summaryAttendanceRecords ***
+                              final attendanceRecord = _summaryAttendanceRecords?.firstWhereOrNull((r) => r.lectureId == lecture.id);
+                              // *** Use checkedIn instead of isCheckedIn ***
+                              final bool isJoined = attendanceRecord != null && !attendanceRecord.checkedIn;
+                              final bool isCheckedIn = attendanceRecord != null && attendanceRecord.checkedIn;
+                              final bool isCurrentlyProcessing = _processingLectureId == lecture.id; // Check if THIS lecture is being processed
 
-                              // Build list tile for each lecture.
                               return Card(
                                 margin: const EdgeInsets.symmetric(vertical: 6.0),
                                 elevation: 1.5,
@@ -700,7 +732,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                   contentPadding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
                                   leading: CircleAvatar(
                                     backgroundColor: brandColor.withOpacity(0.1),
-                                    child: Icon(Icons.schedule_outlined, color: brandColor),
+                                    child: Icon(
+                                       // *** Use isCheckedIn instead of checkedIn ***
+                                       isCheckedIn ? Icons.check_circle : (isJoined ? Icons.hourglass_top_rounded : Icons.schedule_outlined), // Updated icon logic
+                                       color: brandColor
+                                    ),
                                   ),
                                   title: Text('${lecture.unitName} (${lecture.unitCode})', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
                                   subtitle: Padding(
@@ -710,36 +746,41 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                       style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3),
                                     ),
                                   ),
-                                  isThreeLine: true, // Allow subtitle to wrap
-                                  // Trailing widget: Either "Joined" chip or "Join" button.
-                                  trailing: isSuccessfullyJoined
-                                    // Show "Joined" chip if successfully joined/checked-in.
-                                    ? Chip(
-                                        avatar: Icon(Icons.check_circle, size: 18, color: Colors.green.shade800), // Use filled check
+                                  isThreeLine: true,
+                                  // --- Updated Trailing Widget Logic ---
+                                  // *** Use isCheckedIn instead of checkedIn ***
+                                  trailing: isCheckedIn
+                                    ? Chip( // Checked In Status
+                                        avatar: Icon(Icons.check_circle, size: 18, color: Colors.green.shade800),
                                         label: Text('Checked In', style: TextStyle(color: Colors.green.shade900, fontWeight: FontWeight.w500)),
                                         backgroundColor: Colors.green.shade100,
-                                        side: BorderSide.none,
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        side: BorderSide.none, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       )
-                                    // Show "Join" button otherwise.
-                                    : ElevatedButton(
-                                        // Disable button if any join/scan is in progress or if student cannot perform actions.
-                                        onPressed: (isJoining || _isCheckingInViaQr || !canPerformActions)
-                                            ? null
-                                            : () => showJoinLectureDialog(lecture), // Trigger manual join confirmation
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: brandColor,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                          minimumSize: const Size(80, 36),
+                                    : isJoined
+                                      ? Chip( // Joined Status (Ready for QR Check-in)
+                                          avatar: Icon(Icons.hourglass_bottom_rounded, size: 18, color: Colors.orange.shade800),
+                                          label: Text('Joined', style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.w500)),
+                                          backgroundColor: Colors.orange.shade100,
+                                          side: BorderSide.none, padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        )
+                                      : ElevatedButton( // Join Button
+                                          // Disable if ANY lecture is being processed
+                                          onPressed: (_processingLectureId != null || !canPerformActions)
+                                              ? null
+                                              : () => showJoinLectureDialog(lecture), // Trigger manual join confirmation
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: brandColor, foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                            textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                            minimumSize: const Size(80, 36),
+                                          ),
+                                          // Show loading only if THIS lecture is being processed
+                                          child: isCurrentlyProcessing
+                                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                            : const Text('Join'),
                                         ),
-                                        // Show loading indicator or "Join" text.
-                                        child: isCurrentlyJoiningManually
-                                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                          : const Text('Join'),
-                                      ),
+                                  // --- End Trailing Widget Logic ---
                                 ),
                               );
                            },
@@ -747,7 +788,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                       },
                     ),
                   )
-                // Show placeholder if initial filters not applied OR if reg number is missing.
+                // Placeholder if initial filters not applied OR if reg number is missing.
                 : Center(
                     child: Padding(
                       padding: const EdgeInsets.all(20.0),
@@ -768,7 +809,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                           ),
                           // Add a button to retry initial filter selection if needed
-                          if (!initialFiltersApplied && canPerformActions) // Corrected condition: Show if initial filters not applied AND can perform actions
+                          if (!initialFiltersApplied && canPerformActions)
                              Padding(
                                padding: const EdgeInsets.only(top: 15.0),
                                child: ElevatedButton.icon(

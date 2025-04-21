@@ -1,6 +1,6 @@
 // lib/models/attendance_record.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; // For immutable annotation
+import 'package:flutter/foundation.dart'; // For immutable annotation and kDebugMode
 import 'package:intl/intl.dart'; // For formatting dates/times in UI if needed
 
 // Helper function to parse Timestamps from various formats (API/Firestore)
@@ -9,25 +9,30 @@ Timestamp? _parseTimestamp(dynamic timestampData) {
   if (timestampData is Timestamp) return timestampData;
   if (timestampData is String) {
     try {
-      // Try parsing as ISO 8601 string
+      // Try parsing as ISO 8601 string (ensure UTC if no offset)
       return Timestamp.fromDate(DateTime.parse(timestampData).toUtc());
     } catch (e) {
-      print("Error parsing timestamp string: $timestampData, Error: $e");
+      if (kDebugMode) print("Error parsing timestamp string: $timestampData, Error: $e");
       return null;
     }
   } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
     // Firestore-like map { _seconds: ..., _nanoseconds: ... }
-    return Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
+    try {
+       return Timestamp(timestampData['_seconds'] as int, timestampData['_nanoseconds'] as int? ?? 0);
+    } catch (e) {
+       if (kDebugMode) print("Error parsing timestamp map: $timestampData, Error: $e");
+       return null;
+    }
   } else if (timestampData is int) {
     // Assuming milliseconds since epoch if it's an int
     try {
       return Timestamp.fromMillisecondsSinceEpoch(timestampData);
     } catch (e) {
-       print("Error parsing timestamp int: $timestampData, Error: $e");
+       if (kDebugMode) print("Error parsing timestamp int: $timestampData, Error: $e");
        return null;
     }
   }
-  print("Unrecognized timestamp format: $timestampData");
+  if (kDebugMode) print("Unrecognized timestamp format: $timestampData");
   return null;
 }
 
@@ -41,27 +46,37 @@ String? _toIso8601String(dynamic dateOrTimestamp) {
   return dateTime.toUtc().toIso8601String(); // Use UTC for consistency
 }
 
+// Helper function to safely parse boolean from various formats
+bool _parseBool(dynamic boolData) {
+  if (boolData == null) return false;
+  if (boolData is bool) return boolData;
+  if (boolData is String) return boolData.toLowerCase() == 'true';
+  if (boolData is int) return boolData == 1;
+  return false; // Default to false for unrecognized types
+}
+
+
 @immutable // Mark class as immutable
 class AttendanceRecord {
   final String id; // Firestore document ID or API ID
   final String lectureId;
-  final String userId; 
-  final String studentName; 
+  final String userId; // Using userId as per your provided code
+  final String studentName;
   final String registrationNumber;
   final Timestamp joinedAt; // When the student joined the lecture
-  final Timestamp? checkInTime; 
-  final bool checkedIn; 
+  final Timestamp? checkInTime;
+  final bool checkedIn; // Using checkedIn as per your provided code
   final String? checkedInBy; // Lecturer's User ID who checked them in
 
   const AttendanceRecord({ // Use const constructor
     required this.id,
     required this.lectureId,
-    required this.userId, 
+    required this.userId,
     required this.studentName,
     required this.registrationNumber,
     required this.joinedAt,
-    required this.checkedIn, 
-    this.checkInTime, 
+    required this.checkedIn, // Use checkedIn
+    this.checkInTime,
     this.checkedInBy,
   });
 
@@ -77,12 +92,12 @@ class AttendanceRecord {
     return AttendanceRecord(
       id: doc.id,
       lectureId: data['lectureId'] as String? ?? '',
-      userId: data['userId'] as String? ?? '',
+      userId: data['userId'] as String? ?? '', // Use userId
       studentName: data['studentName'] as String? ?? 'Unknown Student',
       registrationNumber: data['registrationNumber'] as String? ?? 'N/A',
       joinedAt: _parseTimestamp(data['joinedAt']) ?? Timestamp.now(),
-      checkedIn: data['checkedIn'] as bool? ?? false, 
-      checkInTime: _parseTimestamp(data['checkInTime']), 
+      checkedIn: _parseBool(data['checkedIn']), // Use checkedIn and safe parsing
+      checkInTime: _parseTimestamp(data['checkInTime']),
       checkedInBy: data['checkedInBy'] as String?,
     );
   }
@@ -91,13 +106,13 @@ class AttendanceRecord {
     // Used when writing data *to* Firestore from the client (less common for attendance)
     return {
       'lectureId': lectureId,
-      'userId': userId, 
+      'userId': userId, // Use userId
       'studentName': studentName,
       'registrationNumber': registrationNumber,
-      'joinedAt': joinedAt, 
-      'checkedIn': checkedIn,
-      'checkInTime': checkInTime, 
-      'checkedInBy': checkedInBy, 
+      'joinedAt': joinedAt,
+      'checkedIn': checkedIn, // Use checkedIn
+      'checkInTime': checkInTime,
+      'checkedInBy': checkedInBy,
     };
   }
   // --- End Firestore Conversion ---
@@ -109,11 +124,11 @@ class AttendanceRecord {
       // Use 'id' or '_id' from API, fallback
       id: json['id'] as String? ?? json['_id'] as String? ?? '',
       lectureId: json['lectureId'] as String? ?? '',
-      userId: json['userId'] as String? ?? '', 
+      userId: json['userId'] as String? ?? '', // Use userId
       studentName: json['studentName'] as String? ?? 'Unknown Student',
       registrationNumber: json['registrationNumber'] as String? ?? 'N/A',
-      joinedAt: _parseTimestamp(json['joinedAt']) ?? Timestamp.now(), 
-      checkedIn: json['checkedIn'] as bool? ?? false, 
+      joinedAt: _parseTimestamp(json['joinedAt']) ?? Timestamp.now(),
+      checkedIn: _parseBool(json['checkedIn']), // Use checkedIn and safe parsing
       checkInTime: _parseTimestamp(json['checkInTime']), // nullable
       checkedInBy: json['checkedInBy'] as String?,
     );
@@ -124,12 +139,12 @@ class AttendanceRecord {
     return {
       // 'id': id, // Usually not sent when creating/updating via actions
       'lectureId': lectureId,
-      'userId': userId,
+      'userId': userId, // Use userId
       'studentName': studentName,
       'registrationNumber': registrationNumber,
       'joinedAt': _toIso8601String(joinedAt), // Send as ISO string
-      'checkedIn': checkedIn,
-      'checkInTime': _toIso8601String(checkInTime), // Renamed, send as ISO string or null
+      'checkedIn': checkedIn, // Use checkedIn
+      'checkInTime': _toIso8601String(checkInTime), // Send as ISO string or null
       'checkedInBy': checkedInBy,
     };
   }
@@ -140,26 +155,26 @@ class AttendanceRecord {
    AttendanceRecord copyWith({
     String? id,
     String? lectureId,
-    String? userId, 
+    String? userId,
     String? studentName,
     String? registrationNumber,
     Timestamp? joinedAt,
-    bool? checkedIn, 
-    Timestamp? checkInTime, 
+    bool? checkedIn, // Use checkedIn
+    Timestamp? checkInTime,
     String? checkedInBy,
     // Add bool flags to explicitly handle setting nullable fields to null
-    bool setCheckInTimeNull = false, 
+    bool setCheckInTimeNull = false,
     bool setCheckedInByNull = false,
   }) {
     return AttendanceRecord(
       id: id ?? this.id,
       lectureId: lectureId ?? this.lectureId,
-      userId: userId ?? this.userId, 
+      userId: userId ?? this.userId, // Use userId
       studentName: studentName ?? this.studentName,
       registrationNumber: registrationNumber ?? this.registrationNumber,
       joinedAt: joinedAt ?? this.joinedAt,
-      checkedIn: checkedIn ?? this.checkedIn, 
-      checkInTime: setCheckInTimeNull ? null : (checkInTime ?? this.checkInTime), 
+      checkedIn: checkedIn ?? this.checkedIn, // Use checkedIn
+      checkInTime: setCheckInTimeNull ? null : (checkInTime ?? this.checkInTime),
       checkedInBy: setCheckedInByNull ? null : (checkedInBy ?? this.checkedInBy),
     );
   }
@@ -176,12 +191,12 @@ class AttendanceRecord {
     return other is AttendanceRecord &&
         other.id == id &&
         other.lectureId == lectureId &&
-        other.userId == userId && 
+        other.userId == userId && // Use userId
         other.studentName == studentName &&
         other.registrationNumber == registrationNumber &&
         other.joinedAt == joinedAt &&
-        other.checkedIn == checkedIn && 
-        other.checkInTime == checkInTime && 
+        other.checkedIn == checkedIn && // Use checkedIn
+        other.checkInTime == checkInTime &&
         other.checkedInBy == checkedInBy;
   }
 
@@ -189,11 +204,11 @@ class AttendanceRecord {
   int get hashCode =>
       id.hashCode ^
       lectureId.hashCode ^
-      userId.hashCode ^ 
+      userId.hashCode ^ // Use userId
       studentName.hashCode ^
       registrationNumber.hashCode ^
       joinedAt.hashCode ^
-      checkedIn.hashCode ^
-      checkInTime.hashCode ^ 
+      checkedIn.hashCode ^ // Use checkedIn
+      checkInTime.hashCode ^
       checkedInBy.hashCode;
 }

@@ -294,41 +294,68 @@ class ApiService {
 
   // --- Attendance API Methods ---
 
-  /// Allows a student to join a lecture (e.g., manual join or QR scan result).
+  /// Allows a student to join a lecture (MANUAL JOIN BUTTON).
   /// Backend uses the auth token to get studentId and profile details.
+  /// Backend MUST ensure isCheckedIn is set to false or remains unchanged.
   Future<AttendanceRecord> joinLecture(String lectureId) async {
     // Endpoint assumes backend route is POST /attendance/join/{lectureId}
-    // No request body needed as backend uses token and path param
-    final uri = Uri.parse('$_baseUrl/attendance/join/$lectureId'); // Adjust if your backend route differs
-    if (kDebugMode) print("API Request: POST $uri");
+    final uri = Uri.parse('$_baseUrl/attendance/join/$lectureId');
+    if (kDebugMode) print("API Request (Student Join): POST $uri");
     try {
       final response = await http.post(
         uri,
-        headers: await _getHeaders(includeContentType: false), // Auth needed (student must be logged in), no body
+        headers: await _getHeaders(includeContentType: false), // Auth needed (student)
       );
-      // Use _handleResponse which throws on error or returns decoded JSON
       final Map<String, dynamic> data = _handleResponse(response);
-      // Expect the created/updated attendance record back
-      // Ensure AttendanceRecord.fromApiJson exists and handles the structure
       return AttendanceRecord.fromApiJson(data);
     } catch (e) {
         if (kDebugMode) print("Error in joinLecture: $e");
-        if (e is ApiException) rethrow; // Rethrow specific API exceptions
-        throw ApiException("Failed to join lecture: ${e.toString()}"); // Wrap other errors
+        if (e is ApiException) rethrow;
+        throw ApiException("Failed to join lecture: ${e.toString()}");
     }
   }
+
+  // --- NEW METHOD for Student Check-in via Lecture QR ---
+  /// Allows a student to check-in by scanning the LECTURER's QR code.
+  /// Backend MUST verify the student has already joined (isCheckedIn == false).
+  Future<AttendanceRecord> checkInViaLectureQr(String lectureId) async {
+    // Endpoint assumes backend route is POST /attendance/checkin/student/{lectureId}
+    final uri = Uri.parse('$_baseUrl/attendance/checkin/student/$lectureId'); // Adjust if your backend route differs
+    if (kDebugMode) print("API Request (Student Check-In via QR): POST $uri");
+    try {
+      final response = await http.post(
+        uri,
+        headers: await _getHeaders(includeContentType: false), // Auth needed (student)
+      );
+      final Map<String, dynamic> data = _handleResponse(response);
+      return AttendanceRecord.fromApiJson(data);
+    } catch (e) {
+        if (kDebugMode) print("Error in checkInViaLectureQr: $e");
+        // Provide more specific feedback based on potential API error messages
+        if (e is ApiException) {
+            if (e.statusCode == 404 || e.statusCode == 400) { // Example: Not Found or Bad Request if not joined
+                throw ApiException('Check-in failed: You must join the lecture first.', statusCode: e.statusCode);
+            } else if (e.statusCode == 409) { // Example: Conflict if already checked in
+                 throw ApiException('Check-in failed: You are already checked in.', statusCode: e.statusCode);
+            }
+            rethrow; // Rethrow other API exceptions
+        }
+        throw ApiException("Failed to check-in via QR: ${e.toString()}");
+    }
+  }
+  // --- END NEW METHOD ---
 
   /// Allows a lecturer to check in a student using their registration number.
   /// Assumes backend handles lookup and record creation/update.
   Future<AttendanceRecord> checkInStudent(String lectureId, String registrationNumber) async {
     // Endpoint assumes backend route is POST /attendance/checkin (or similar)
-    // Check your backend route definition for the exact path and expected body
+    // NO CHANGES NEEDED HERE - This is for LECTURER actions
     final uri = Uri.parse('$_baseUrl/attendance/checkin'); // Adjust if needed
     final requestBody = jsonEncode({
         'lectureId': lectureId,
         'registrationNumber': registrationNumber,
       });
-    if (kDebugMode) print("API Request: POST $uri with body: $requestBody");
+    if (kDebugMode) print("API Request (Lecturer Check-In): POST $uri with body: $requestBody");
     try {
       final response = await http.post(
         uri,
@@ -344,8 +371,8 @@ class ApiService {
         if (kDebugMode) print("Error in checkInStudent: $e");
         // Provide more specific feedback based on potential API error messages
         if (e is ApiException) {
-            if (e.statusCode == 404) { // Example: If backend returns 404 for student/lecture not found
-                throw ApiException('Check-in failed: Student ($registrationNumber) or Lecture not found.', statusCode: e.statusCode);
+            if (e.statusCode == 404) { // Example: If backend returns 404 for student/lecture not found or not joined
+                throw ApiException('Check-in failed: Student ($registrationNumber) or Lecture not found, or student has not joined.', statusCode: e.statusCode);
             } else if (e.statusCode == 409) { // Example: If backend returns 409 for already checked in
                  throw ApiException('Check-in failed: Student $registrationNumber is already checked in.', statusCode: e.statusCode);
             } else if (e.statusCode == 400) { // Example: Bad request (e.g., invalid reg number format)

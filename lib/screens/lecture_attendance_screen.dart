@@ -1,6 +1,6 @@
 // lib/screens/lecture_attendance_screen.dart
 import 'dart:io'; // For File operations
-// For Uint8List
+import 'dart:typed_data'; // For Uint8List
 import 'dart:ui' as ui; // For Image rendering
 
 import 'package:checkmate/models/attendance_record.dart';
@@ -94,24 +94,17 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       final xFile = XFile(file.path);
       final result = await Share.shareXFiles(
         [xFile],
-        text: 'QR Code for ${widget.lecture.unitName} (${widget.lecture.unitCode}) lecture.',
-        subject: 'Lecture QR Code: ${widget.lecture.unitCode}',
+        text: 'QR Code for ${widget.lecture.unitName} (${widget.lecture.unitCode}) lecture check-in.', // Updated text
+        subject: 'Lecture Check-In QR Code: ${widget.lecture.unitCode}', // Updated subject
       );
 
       // Handle share result
       if (result.status == ShareResultStatus.success) {
         print('QR Code shared/saved successfully.');
-        // Optionally show a success message if needed, though the share sheet closing is often enough feedback
-        // if (mounted) {
-        //   ScaffoldMessenger.of(context).showSnackBar(
-        //     const SnackBar(content: Text('QR Code prepared!'), backgroundColor: Colors.green),
-        //   );
-        // }
       } else if (result.status == ShareResultStatus.dismissed) {
          print('Share sheet dismissed.');
       } else {
         print('Sharing status: ${result.status}');
-        // Optionally show a message if sharing was unavailable or failed
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Could not complete action: ${result.status}'), backgroundColor: Colors.orange),
@@ -132,7 +125,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   // --- End Capture and Share Function ---
 
 
-  // --- Function to Show QR Code Dialog ---
+  // --- Function to Show QR Code Dialog (Updated Text) ---
   void _showQrCodeDialog() {
     // Ensure lecture ID is available
     if (widget.lecture.id.isEmpty) {
@@ -202,6 +195,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                           ),
                           padding: const EdgeInsets.all(8),
                           child: QrImageView(
+                            // *** Data remains Lecture ID ***
                             data: widget.lecture.id,
                             version: QrVersions.auto,
                             size: qrSize,
@@ -223,11 +217,13 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                       ),
                       // --- End QR Code Widget ---
                       const SizedBox(height: 20),
+                      // --- *** UPDATED INSTRUCTIONAL TEXT *** ---
                       const Text(
-                        'Students: Scan this code with the Checkmate app to check in for this lecture.',
+                        'Students: Scan this code with the Checkmate app *after joining* to CHECK IN for this lecture.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 14, color: Colors.black54),
                       ),
+                      // --- *** END TEXT UPDATE *** ---
                     ],
                   ),
                 ),
@@ -236,32 +232,23 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
               actions: <Widget>[
                 // --- Download/Share Button ---
                 ElevatedButton.icon(
-                  // --- UPDATED ICON ---
                   icon: isDialogProcessingShare
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: LectureAttendanceScreen.brandColor))
-                      : const Icon(Icons.download_outlined, size: 20), // Changed to Download icon
-                  // --- UPDATED LABEL ---
-                  label: Text(isDialogProcessingShare ? 'Processing...' : 'Download'), // Updated label
+                      : const Icon(Icons.download_outlined, size: 20),
+                  label: Text(isDialogProcessingShare ? 'Processing...' : 'Download'),
                   style: ElevatedButton.styleFrom(
-                     foregroundColor: LectureAttendanceScreen.brandColor, // Text color
-                     backgroundColor: LectureAttendanceScreen.brandColor.withOpacity(0.1), // Lighter background
+                     foregroundColor: LectureAttendanceScreen.brandColor,
+                     backgroundColor: LectureAttendanceScreen.brandColor.withOpacity(0.1),
                      elevation: 0,
                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                   onPressed: isDialogProcessingShare ? null : () async {
-                     // Use setDialogState to update the button's loading indicator
                      setDialogState(() { isDialogProcessingShare = true; });
                      try {
                         await _captureAndShareQrCode();
-                        // Optional: Close dialog automatically after share sheet is dismissed/action taken
-                        // if (dialogContext.mounted) {
-                        //   Navigator.of(dialogContext).pop();
-                        // }
                      } finally {
-                        // Check if dialog is still mounted before resetting state
-                        // Using 'context' from StatefulBuilder which should be valid here
-                        if (context.mounted) {
+                        if (context.mounted) { // Use the context from StatefulBuilder
                            setDialogState(() { isDialogProcessingShare = false; });
                         }
                      }
@@ -275,8 +262,8 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                   child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  onPressed: isDialogProcessingShare ? null : () { // Disable close while processing
-                    Navigator.of(dialogContext).pop(); // Use the original dialog context to pop
+                  onPressed: isDialogProcessingShare ? null : () {
+                    Navigator.of(dialogContext).pop();
                   },
                 ),
               ],
@@ -293,6 +280,11 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final appBarSubtitle = '${widget.lecture.formattedDate} | ${widget.lecture.formattedStartTime} - ${widget.lecture.formattedEndTime} | ${widget.lecture.venue}';
+
+    // --- Date and Time Formatter ---
+    // Example format: Aug 20, 09:30 AM
+    // Adjust the pattern as needed (e.g., 'dd/MM/yy, HH:mm' for 20/08/24, 14:30)
+    final dateTimeFormatter = DateFormat('MMM d, hh:mm a');
 
     return Scaffold(
       appBar: AppBar(
@@ -314,7 +306,8 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.qr_code_2),
-            tooltip: 'Show Check-in QR Code',
+            // *** Updated tooltip ***
+            tooltip: 'Show Lecture Check-In QR Code',
             onPressed: _showQrCodeDialog,
           ),
           IconButton(
@@ -355,17 +348,30 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                              ], ), ), ), ), ); });
             }
 
-            // --- Success: Display Attendance List ---
+            // --- Success: Display Attendance List (Updated Time Formatting & Sorting) ---
             final attendanceList = snapshot.data!;
+            // Sort: Checked In first (by time), then Joined (by time)
             attendanceList.sort((a, b) {
-               final bool aCheckedIn = a.checkedIn; final bool bCheckedIn = b.checkedIn;
+               // *** Use checkedIn instead of isCheckedIn ***
+               final bool aCheckedIn = a.checkedIn;
+               final bool bCheckedIn = b.checkedIn;
+
+               // If both checked in, sort by checkInTime (earlier first, nulls last)
                if (aCheckedIn && bCheckedIn) {
                  final aTime = a.checkInTime; final bTime = b.checkInTime;
-                 if (aTime != null && bTime != null) { return aTime.compareTo(bTime); }
-                 else if (aTime != null) { return -1; } else if (bTime != null) { return 1; }
-                 else { return 0; }
-               } else if (aCheckedIn) { return -1; } else if (bCheckedIn) { return 1; }
-               else { return a.studentName.toLowerCase().compareTo(b.studentName.toLowerCase()); }
+                 if (aTime != null && bTime != null) return aTime.compareTo(bTime);
+                 if (aTime == null && bTime != null) return 1; // Nulls last
+                 if (aTime != null && bTime == null) return -1; // Nulls last
+                 return 0; // Both null (shouldn't happen if checkedIn is true)
+               }
+               // If only 'a' is checked in, it comes first
+               else if (aCheckedIn && !bCheckedIn) { return -1; }
+               // If only 'b' is checked in, it comes first
+               else if (!aCheckedIn && bCheckedIn) { return 1; }
+               // If both joined (but not checked in), sort by joinedAt (earlier first)
+               else { // (!aCheckedIn && !bCheckedIn)
+                 return a.joinedAt.compareTo(b.joinedAt);
+               }
             });
 
             return ListView.separated(
@@ -375,20 +381,46 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
               separatorBuilder: (context, index) => const Divider(height: 0.5, thickness: 0.5, indent: 72, endIndent: 16),
               itemBuilder: (context, index) {
                 final record = attendanceList[index];
+                // *** Use checkedIn instead of isCheckedIn ***
                 final bool isCheckedIn = record.checkedIn;
                 final String statusText; final Color statusColor; final IconData statusIcon; final String timeString;
+
                 if (isCheckedIn) {
-                  timeString = record.checkInTime != null ? DateFormat.jm().format(record.checkInTime!.toDate().toLocal()) : 'N/A';
-                  statusText = 'Checked In @ $timeString'; statusColor = Colors.green.shade700; statusIcon = Icons.check_circle;
+                  // Use checkInTime if available, format with date and time
+                  timeString = record.checkInTime != null
+                      ? dateTimeFormatter.format(record.checkInTime!.toDate().toLocal()) // Format Date & Time
+                      : 'N/A'; // Fallback if checkInTime is null despite checkedIn=true (data inconsistency)
+                  statusText = 'Checked In @ $timeString';
+                  statusColor = Colors.green.shade700;
+                  statusIcon = Icons.check_circle;
                 } else {
-                  timeString = DateFormat.jm().format(record.joinedAt.toDate().toLocal());
-                  statusText = 'Joined @ $timeString'; statusColor = Colors.orange.shade800; statusIcon = Icons.hourglass_top_rounded;
+                  // Use joinedAt time, format with date and time
+                  timeString = dateTimeFormatter.format(record.joinedAt.toDate().toLocal()); // Format Date & Time
+                  statusText = 'Joined @ $timeString';
+                  statusColor = Colors.orange.shade800;
+                  statusIcon = Icons.hourglass_top_rounded; // Icon indicating waiting for check-in
                 }
+
                 return ListTile(
-                  leading: CircleAvatar( backgroundColor: statusColor.withOpacity(0.12), foregroundColor: statusColor, child: Text( (index + 1).toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), ), ),
+                  leading: CircleAvatar(
+                     backgroundColor: statusColor.withOpacity(0.12),
+                     foregroundColor: statusColor,
+                     child: Text( (index + 1).toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), ),
+                  ),
                   title: Text(record.studentName, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w500)),
                   subtitle: Text( 'Reg #: ${record.registrationNumber}', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700), ),
-                  trailing: Chip( avatar: Icon(statusIcon, color: statusColor, size: 16), label: Text( statusText, style: TextStyle(fontSize: 11.5, color: statusColor, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis, ), backgroundColor: statusColor.withOpacity(0.1), side: BorderSide.none, padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), visualDensity: VisualDensity.compact, ),
+                  trailing: Chip(
+                     avatar: Icon(statusIcon, color: statusColor, size: 16),
+                     label: Text(
+                       statusText,
+                       style: TextStyle(fontSize: 11.5, color: statusColor, fontWeight: FontWeight.w500),
+                       overflow: TextOverflow.ellipsis,
+                     ),
+                     backgroundColor: statusColor.withOpacity(0.1),
+                     side: BorderSide.none,
+                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                     visualDensity: VisualDensity.compact,
+                  ),
                   dense: true,
                 );
               },

@@ -25,10 +25,9 @@ const formatTimestamp = (timestamp) => {
 };
 
 
-// --- Student joins/checks-in for a lecture ---
+// --- Student JOINS a lecture (Manual Button) ---
 // Endpoint: POST /api/firebase/attendance/join/:lectureId
-// This endpoint is triggered when a student scans a QR code or confirms manual join.
-// It handles BOTH joining AND checking-in the student in one step.
+// This endpoint ONLY marks the student as having joined. It DOES NOT check them in.
 // Requires authentication (checkAuth middleware)
 router.post('/join/:lectureId', checkAuth, async (req, res) => {
   try {
@@ -39,115 +38,197 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
     const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
     const lectureDoc = await lectureRef.get();
     if (!lectureDoc.exists) {
-        console.log(`Join/Check-in attempt failed: Lecture not found with ID: ${lectureId}`);
-        return res.status(404).json({ error: 'Lecture not found or is no longer available.' });
+        console.log(`Join attempt failed: Lecture not found with ID: ${lectureId}`);
+        return res.status(404).json({ message: 'Lecture not found or is no longer available.' }); // Use message for consistency
     }
-    const lectureData = lectureDoc.data(); // Get lecture data for potential validation
+    const lectureData = lectureDoc.data();
 
-    // --- Fetch Student Details (including registrationNumber and name) from Firestore ---
+    // --- Fetch Student Details ---
     const studentUserRef = db.collection(USERS_COLLECTION).doc(studentUserId);
     const studentUserDoc = await studentUserRef.get();
 
     if (!studentUserDoc.exists) {
-        console.error(`Join/Check-in attempt failed: User document not found for authenticated user ID: ${studentUserId}`);
-        return res.status(404).json({ error: 'Your user profile could not be found.' });
+        console.error(`Join attempt failed: User document not found for authenticated user ID: ${studentUserId}`);
+        return res.status(404).json({ message: 'Your user profile could not be found.' });
     }
     const studentData = studentUserDoc.data();
 
     // --- Authorization & Validation ---
     if (studentData.role !== 'student') {
-        console.log(`Join/Check-in attempt failed: User ${studentUserId} is not a student (role: ${studentData.role}).`);
-        return res.status(403).json({ error: 'Forbidden: Only students can check in for lectures.' });
+        console.log(`Join attempt failed: User ${studentUserId} is not a student (role: ${studentData.role}).`);
+        return res.status(403).json({ message: 'Forbidden: Only students can join lectures.' });
     }
 
-    // CRITICAL: Use registrationNumber from the user's profile
     const registrationNumber = studentData.registrationNumber;
     if (!registrationNumber) {
-        console.log(`Join/Check-in attempt failed: Student ${studentUserId} does not have a registration number in their profile.`);
-        return res.status(400).json({ error: 'Your profile is missing the registration number. Cannot check in.' });
+        console.log(`Join attempt failed: Student ${studentUserId} does not have a registration number in their profile.`);
+        return res.status(400).json({ message: 'Your profile is missing the registration number. Cannot join.' });
     }
-    // Use name from profile, provide a default if missing
     const studentName = studentData.name || 'N/A';
 
     // --- Optional: Validate if student's profile matches lecture criteria ---
-    // This adds an extra layer of validation if needed
     if (studentData.school !== lectureData.school ||
         studentData.department !== lectureData.department ||
         studentData.course !== lectureData.course ||
         studentData.yearOfStudy !== lectureData.yearOfStudy ||
         studentData.semester !== lectureData.semester) {
-        // Decide whether to block (403) or just warn based on requirements
-        console.error(`Join/Check-in attempt BLOCKED: Student ${studentUserId} profile details do not match lecture ${lectureId} criteria.`);
-        return res.status(403).json({ error: 'Your profile details (School/Dept/Course/Year/Semester) do not match this lecture.' });
-        // Or just warn:
-        // console.warn(`Join/Check-in attempt warning: Student ${studentUserId} profile details do not fully match lecture ${lectureId} criteria. Allowing join anyway.`);
+        console.error(`Join attempt BLOCKED: Student ${studentUserId} profile details do not match lecture ${lectureId} criteria.`);
+        return res.status(403).json({ message: 'Your profile details (School/Dept/Course/Year/Semester) do not match this lecture.' });
     }
 
-    // --- Check if already checked in for this specific lecture ---
+    // --- Check if attendance record already exists ---
     const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
     const existingJoinQuery = await attendanceRef
         .where('lectureId', '==', lectureId)
-        .where('userId', '==', studentUserId) // Check based on authenticated user ID
+        .where('userId', '==', studentUserId)
         .limit(1)
         .get();
 
+    let attendanceRecordData;
+    let recordId;
+    let statusCode = 200; // Default to OK
+    let message = 'Already joined this lecture.'; // Default message
+
     if (!existingJoinQuery.empty) {
-        console.log(`Join/Check-in attempt skipped: Student ${studentUserId} already checked in for lecture ${lectureId}.`);
+        // Record EXISTS - Return existing data, DO NOT MODIFY checkedIn status
+        console.log(`Student ${studentUserId} already has a record for lecture ${lectureId}. Returning existing record.`);
         const existingDoc = existingJoinQuery.docs[0];
-        const existingData = existingDoc.data();
-        // Return the existing record data, ensuring timestamps are formatted
-        return res.status(200).json({ // Use 200 OK to indicate success (already done)
-            message: 'Already checked in for this lecture.',
-            id: existingDoc.id,
-            ...existingData,
-            // Ensure boolean exists and timestamps are formatted
-            checkedIn: existingData.checkedIn === true, // Explicitly check for true
-            checkInTime: formatTimestamp(existingData.checkInTime),
-            joinedAt: formatTimestamp(existingData.joinedAt), // Keep joinedAt if it exists
-        });
+        recordId = existingDoc.id;
+        attendanceRecordData = existingDoc.data();
+        // If already checked in, update message
+        if (attendanceRecordData.checkedIn === true) {
+            message = 'Already checked in for this lecture.';
+        }
+
+    } else {
+        // Record DOES NOT EXIST - Create new record with checkedIn: false
+        console.log(`Student ${studentUserId} joining lecture ${lectureId}. Creating new record.`);
+        const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
+        const newRecord = {
+          userId: studentUserId,
+          studentName: studentName,
+          registrationNumber: registrationNumber,
+          lectureId: lectureId,
+          joinedAt: serverTimestamp, // Record when they joined
+          checkedIn: false, // *** CRITICAL: Set to false for JOIN action ***
+          checkInTime: null,
+          checkedInBy: null,
+        };
+        const docRef = await attendanceRef.add(newRecord);
+        recordId = docRef.id;
+        // Fetch the newly created record to include the server timestamp
+        const newDocSnapshot = await docRef.get();
+        attendanceRecordData = newDocSnapshot.data();
+        statusCode = 201; // Created
+        message = 'Successfully joined lecture.'; // Update message
     }
 
-    // --- Prepare data for Firestore (Student is checking themselves in) ---
-    const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
-    const attendanceData = {
-      lectureId,
-      userId: studentUserId,    // Use authenticated user ID
-      registrationNumber,       // From user profile
-      studentName,              // From user profile
-      joinedAt: serverTimestamp, // Record when the check-in process started
-      checkedIn: true,         // Mark as checked-in immediately
-      checkInTime: serverTimestamp, // Set check-in time
-      checkedInBy: 'student_self', // Indicate self check-in via QR/join confirmation
-    };
-
-    // --- Add attendance record ---
-    const docRef = await attendanceRef.add(attendanceData);
-    console.log(`Student ${studentUserId} (${registrationNumber}) successfully checked in for lecture ${lectureId}. Record ID: ${docRef.id}`);
-
-    // Fetch the created doc to return accurate data including server timestamp
-    const createdDoc = await docRef.get();
-    const createdData = createdDoc.data();
-
-    res.status(201).json({ // 201 Created
-        message: 'Successfully checked in.', // Clearer success message
-        id: createdDoc.id,
-        ...createdData,
-        // Format timestamps for client consistency
-        joinedAt: formatTimestamp(createdData.joinedAt),
-        checkInTime: formatTimestamp(createdData.checkInTime),
-     });
+    // Return the record (either existing or newly created)
+    res.status(statusCode).json({
+        message: message,
+        id: recordId, // Include the document ID
+        ...attendanceRecordData,
+        // Ensure timestamps are formatted consistently
+        joinedAt: formatTimestamp(attendanceRecordData.joinedAt),
+        checkInTime: formatTimestamp(attendanceRecordData.checkInTime),
+        // Ensure boolean value is returned correctly
+        checkedIn: attendanceRecordData.checkedIn === true,
+    });
 
   } catch (error) {
-    console.error(`Error joining/checking in for lecture ${req.params.lectureId} for user ${req.userData?.userId}:`, error);
+    console.error(`Error joining lecture ${req.params.lectureId} for user ${req.userData?.userId}:`, error);
     console.error('Error Stack:', error.stack);
     res.status(500).json({
-        error: 'Internal Server Error: Failed to process check-in',
+        message: 'Internal Server Error: Failed to process join request', // Use message
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
 });
 
-// --- Lecturer manually checks in a student ---
+
+// --- Student CHECKS IN for a lecture via Lecture QR Scan ---
+// Endpoint: POST /api/firebase/attendance/checkin/student/:lectureId
+// This endpoint is triggered ONLY when a student scans the LECTURER's QR code.
+// Requires the student to have ALREADY JOINED (checkedIn: false).
+// Requires authentication (checkAuth middleware)
+router.post('/checkin/student/:lectureId', checkAuth, async (req, res) => {
+    try {
+        const lectureId = req.params.lectureId;
+        const studentUserId = req.userData.userId; // Get user ID from authenticated token
+
+        // --- Validate Lecture Exists (Optional but good practice) ---
+        const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
+        const lectureDoc = await lectureRef.get();
+        if (!lectureDoc.exists) {
+            console.log(`Student QR Check-in attempt failed: Lecture not found with ID: ${lectureId}`);
+            return res.status(404).json({ message: 'Lecture not found or is no longer available.' });
+        }
+
+        // --- Find the existing "Joined" attendance record ---
+        const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
+        const attendanceQuery = await attendanceRef
+          .where('lectureId', '==', lectureId)
+          .where('userId', '==', studentUserId)
+          .limit(1)
+          .get();
+
+        if (attendanceQuery.empty) {
+            // Record DOES NOT EXIST - Student hasn't joined yet
+            console.log(`Student QR Check-in failed: Student ${studentUserId} has not joined lecture ${lectureId} yet.`);
+            return res.status(400).json({ message: 'Check-in failed: You must join the lecture first.' }); // 400 Bad Request or 404 Not Found
+        }
+
+        // Record EXISTS - Check its status
+        const attendanceDoc = attendanceQuery.docs[0];
+        const attendanceData = attendanceDoc.data();
+
+        if (attendanceData.checkedIn === true) {
+            // Already checked in
+            console.log(`Student QR Check-in skipped: Student ${studentUserId} already checked in for lecture ${lectureId}.`);
+            return res.status(200).json({ // 200 OK or 409 Conflict
+                message: 'Already checked in for this lecture.',
+                id: attendanceDoc.id,
+                ...attendanceData,
+                joinedAt: formatTimestamp(attendanceData.joinedAt),
+                checkInTime: formatTimestamp(attendanceData.checkInTime),
+                checkedIn: true,
+            });
+        }
+
+        // Record exists and checkedIn is false - PROCEED WITH CHECK-IN
+        console.log(`Student QR Check-in: Updating record for student ${studentUserId} in lecture ${lectureId}.`);
+        const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
+        await attendanceDoc.ref.update({
+            checkedIn: true,
+            checkInTime: serverTimestamp,
+            checkedInBy: 'student_self_qr', // Indicate self check-in via lecture QR
+        });
+
+        // Fetch the updated doc to return accurate data
+        const updatedDoc = await attendanceDoc.ref.get();
+        const updatedData = updatedDoc.data();
+
+        res.status(200).json({ // 200 OK for successful update
+            message: 'Successfully checked in.',
+            id: updatedDoc.id,
+            ...updatedData,
+            joinedAt: formatTimestamp(updatedData.joinedAt),
+            checkInTime: formatTimestamp(updatedData.checkInTime),
+            checkedIn: true,
+        });
+
+    } catch (error) {
+        console.error(`Error during student QR check-in for lecture ${req.params.lectureId} by user ${req.userData?.userId}:`, error);
+        console.error('Error Stack:', error.stack);
+        res.status(500).json({
+            message: 'Internal Server Error: Failed to process QR check-in',
+            details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+        });
+    }
+});
+
+
+// --- Lecturer manually checks in a student (or via scanning student QR) ---
 // Endpoint: POST /api/firebase/attendance/checkin
 // Requires authentication (checkAuth middleware)
 router.post('/checkin', checkAuth, async (req, res) => {
@@ -160,13 +241,13 @@ router.post('/checkin', checkAuth, async (req, res) => {
     // --- Validate Input ---
     if (!registrationNumber || typeof registrationNumber !== 'string' || registrationNumber.trim() === '') {
       console.log(`Lecturer Check-in failed: Missing or invalid registrationNumber in request body.`);
-      return res.status(400).json({ error: 'Student Registration Number is required.' });
+      return res.status(400).json({ message: 'Student Registration Number is required.' }); // Use message
     }
     if (!lectureId || typeof lectureId !== 'string' || lectureId.trim() === '') {
       console.log(`Lecturer Check-in failed: Missing or invalid lectureId in request body.`);
-      return res.status(400).json({ error: 'Lecture ID is required.' });
+      return res.status(400).json({ message: 'Lecture ID is required.' }); // Use message
     }
-    const trimmedRegNum = registrationNumber.trim();
+    const trimmedRegNum = registrationNumber.trim().toUpperCase(); // Ensure uppercase for query consistency
     const trimmedLectureId = lectureId.trim();
 
     // --- Verify Lecturer Role ---
@@ -174,7 +255,7 @@ router.post('/checkin', checkAuth, async (req, res) => {
     const lecturerUserDoc = await lecturerUserRef.get();
     if (!lecturerUserDoc.exists || lecturerUserDoc.data().role !== 'lecturer') {
         console.log(`Lecturer Check-in failed: User ${lecturerUserId} is not authorized (not found or not a lecturer).`);
-        return res.status(403).json({ error: 'Forbidden: Only lecturers can check students in.' });
+        return res.status(403).json({ message: 'Forbidden: Only lecturers can check students in.' }); // Use message
     }
 
     // --- Verify the Lecture Exists ---
@@ -182,11 +263,10 @@ router.post('/checkin', checkAuth, async (req, res) => {
     const lectureDoc = await lectureRef.get();
     if (!lectureDoc.exists) {
         console.log(`Lecturer Check-in failed: Lecture ${trimmedLectureId} not found.`);
-        return res.status(404).json({ error: 'Lecture not found.' });
+        return res.status(404).json({ message: 'Lecture not found.' }); // Use message
     }
 
     // --- Optional: Verify this lecturer is associated with the lecture ---
-    // Allow any lecturer but log if it's not the assigned one
     if (lectureDoc.data().lecturerId !== lecturerUserId) {
          console.warn(`Check-in allowed: Lecturer ${lecturerUserId} checking in for lecture ${trimmedLectureId} taught by ${lectureDoc.data().lecturerId}.`);
     }
@@ -194,22 +274,21 @@ router.post('/checkin', checkAuth, async (req, res) => {
     // --- Find the student's user document by registration number ---
     // This query requires an index on 'registrationNumber' in the 'users' collection.
     const studentQuery = await db.collection(USERS_COLLECTION)
-        .where('registrationNumber', '==', trimmedRegNum)
+        .where('registrationNumber', '==', trimmedRegNum) // Use uppercase reg num
         .where('role', '==', 'student') // Ensure we find a student
         .limit(1)
         .get();
 
     if (studentQuery.empty) {
         console.log(`Lecturer Check-in failed: Student with registration number ${trimmedRegNum} not found.`);
-        return res.status(404).json({ error: `Student with registration number ${trimmedRegNum} not found.` });
+        return res.status(404).json({ message: `Student with registration number ${trimmedRegNum} not found.` }); // Use message
     }
     const studentDoc = studentQuery.docs[0];
     const studentUserId = studentDoc.id;
     const studentData = studentDoc.data();
     const studentName = studentData.name || 'N/A';
 
-    // --- Find or Create the attendance record ---
-    // We need to handle cases where the student might not have "joined" first via the app
+    // --- Find or Create/Update the attendance record ---
     const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
     const attendanceQuery = await attendanceRef
       .where('lectureId', '==', trimmedLectureId)
@@ -220,6 +299,8 @@ router.post('/checkin', checkAuth, async (req, res) => {
     let attendanceDocRef;
     let currentAttendanceData = {};
     const serverTimestamp = admin.firestore.FieldValue.serverTimestamp();
+    let statusCode = 200; // Default OK
+    let responseMessage = '';
 
     if (attendanceQuery.empty) {
       // Student hasn't joined via app, create a new record directly as checked-in
@@ -229,16 +310,15 @@ router.post('/checkin', checkAuth, async (req, res) => {
         userId: studentUserId,
         registrationNumber: trimmedRegNum,
         studentName: studentName,
-        joinedAt: serverTimestamp, // Set joined time to now
+        joinedAt: serverTimestamp, // Set joined time to now (when lecturer checked them in)
         checkedIn: true,
         checkInTime: serverTimestamp, // Set check-in time to now
         checkedInBy: lecturerUserId, // Record who checked them in
       };
       attendanceDocRef = await attendanceRef.add(newAttendanceData);
       currentAttendanceData = newAttendanceData; // Use the data we just prepared
-      // Adjust timestamps for immediate use if needed, though fetching below is safer
-      currentAttendanceData.joinedAt = new Date();
-      currentAttendanceData.checkInTime = new Date();
+      statusCode = 201; // Created
+      responseMessage = `Student ${studentName} (${trimmedRegNum}) checked in successfully (new record created).`;
 
     } else {
       // Record exists, check if already checked in
@@ -247,14 +327,8 @@ router.post('/checkin', checkAuth, async (req, res) => {
 
       if (currentAttendanceData.checkedIn === true) {
           console.log(`Lecturer Check-in skipped: Student ${trimmedRegNum} already checked into lecture ${trimmedLectureId}.`);
-          // Return existing data
-          return res.status(200).json({
-              message: 'Student already checked in.',
-              id: attendanceQuery.docs[0].id,
-              ...currentAttendanceData,
-              checkInTime: formatTimestamp(currentAttendanceData.checkInTime),
-              joinedAt: formatTimestamp(currentAttendanceData.joinedAt),
-          });
+          responseMessage = 'Student already checked in.';
+          statusCode = 200; // OK, already done
       } else {
           // Record exists but not checked in, update it
           console.log(`Lecturer Check-in: Updating existing record for student ${studentUserId} in lecture ${trimmedLectureId}.`);
@@ -263,25 +337,27 @@ router.post('/checkin', checkAuth, async (req, res) => {
             checkInTime: serverTimestamp,
             checkedInBy: lecturerUserId,
           });
+          responseMessage = `Student ${studentName} (${trimmedRegNum}) checked in successfully (updated existing record).`;
+          statusCode = 200; // OK, updated
       }
     }
 
-    console.log(`Lecturer Check-in successful: Student ${trimmedRegNum} marked as checked into lecture ${trimmedLectureId} by lecturer ${lecturerUserId}.`);
+    console.log(`Lecturer Check-in processed for student ${trimmedRegNum} in lecture ${trimmedLectureId} by lecturer ${lecturerUserId}. Status: ${statusCode}`);
 
     // Fetch the final data (either newly created or updated) to return consistent timestamps
     const finalDoc = await attendanceDocRef.get();
     const finalData = finalDoc.data();
 
     // --- Return success message with student details ---
-    res.status(200).json({ // Use 200 OK for both create and update via this route
-        message: `Student ${finalData.studentName || 'N/A'} (${finalData.registrationNumber}) checked in successfully.`,
-        checkedInData: {
-            id: finalDoc.id,
-            ...finalData,
-            // Format timestamps for client
-            checkInTime: formatTimestamp(finalData.checkInTime),
-            joinedAt: formatTimestamp(finalData.joinedAt),
-        }
+    res.status(statusCode).json({
+        message: responseMessage,
+        // Return the full record data for consistency
+        id: finalDoc.id,
+        ...finalData,
+        // Format timestamps for client
+        checkInTime: formatTimestamp(finalData.checkInTime),
+        joinedAt: formatTimestamp(finalData.joinedAt),
+        checkedIn: finalData.checkedIn === true, // Ensure boolean
     });
 
   } catch (error) {
@@ -291,12 +367,12 @@ router.post('/checkin', checkAuth, async (req, res) => {
     if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
         console.error("Firestore Index Missing: The query requires an index (likely on registrationNumber and role in users collection). Check the error details for a link to create it.");
         return res.status(500).json({
-            error: 'Internal Server Error: Failed to check in student due to missing database index.',
+            message: 'Internal Server Error: Failed to check in student due to missing database index.', // Use message
             details: 'A required Firestore index is missing.'
         });
     }
     res.status(500).json({
-        error: 'Internal Server Error: Failed to check in student',
+        message: 'Internal Server Error: Failed to check in student', // Use message
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
@@ -314,7 +390,7 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
     // --- Authorization: Ensure users can only view their own attendance ---
     if (requestedUserId !== authUserId) {
         console.log(`Forbidden attempt: User ${authUserId} tried to access attendance for ${requestedUserId}`);
-        return res.status(403).json({ error: 'Forbidden: You can only access your own attendance records.' });
+        return res.status(403).json({ message: 'Forbidden: You can only access your own attendance records.' }); // Use message
     }
 
     // --- Fetch Attendance Records for the student ---
@@ -408,7 +484,7 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
     console.error(`Error getting student attendance for user ${req.params.userId}:`, error);
     console.error('Error Stack:', error.stack);
     res.status(500).json({
-        error: 'Internal Server Error: Failed to get student attendance',
+        message: 'Internal Server Error: Failed to get student attendance', // Use message
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
@@ -427,7 +503,7 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
     const lecturerUserDoc = await lecturerUserRef.get();
     if (!lecturerUserDoc.exists || lecturerUserDoc.data().role !== 'lecturer') {
         console.log(`Attendance view failed: User ${lecturerUserId} is not authorized (not found or not a lecturer).`);
-        return res.status(403).json({ error: 'Forbidden: Only lecturers can view lecture attendance.' });
+        return res.status(403).json({ message: 'Forbidden: Only lecturers can view lecture attendance.' }); // Use message
     }
 
     // --- Verify the lecture exists ---
@@ -435,12 +511,12 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
     const lectureDoc = await lectureRef.get();
     if (!lectureDoc.exists) {
         console.log(`Attendance view failed: Lecture ${lectureId} not found.`);
-        return res.status(404).json({ error: 'Lecture not found.' });
+        return res.status(404).json({ message: 'Lecture not found.' }); // Use message
     }
     // --- Optional: Verify this lecturer owns the lecture ---
     // if (lectureDoc.data().lecturerId !== lecturerUserId) {
     //     console.log(`Attendance view failed: Lecturer ${lecturerUserId} is not the assigned lecturer for lecture ${lectureId}.`);
-    //     return res.status(403).json({ error: 'Forbidden: You can only view attendance for your own lectures.' });
+    //     return res.status(403).json({ message: 'Forbidden: You can only view attendance for your own lectures.' }); // Use message
     // }
 
     // --- Fetch Attendance Records for the specific lecture ---
@@ -475,12 +551,12 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
     if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
         console.error("Firestore Index Missing: The query requires an index (likely on lectureId and studentName). Check the error details for a link to create it.");
         return res.status(500).json({
-            error: 'Internal Server Error: Failed to get lecture attendance due to missing database index.',
+            message: 'Internal Server Error: Failed to get lecture attendance due to missing database index.', // Use message
             details: 'A required Firestore index is missing.'
         });
     }
     res.status(500).json({
-        error: 'Internal Server Error: Failed to get lecture attendance',
+        message: 'Internal Server Error: Failed to get lecture attendance', // Use message
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
