@@ -34,7 +34,6 @@ class LecturerDashboard extends StatefulWidget {
   @override
   State<LecturerDashboard> createState() => _LecturerDashboardState();
 }
-
 class _LecturerDashboardState extends State<LecturerDashboard> {
   final ApiService apiService = ApiService();
   late Future<List<Lecture>> lecturesFuture;

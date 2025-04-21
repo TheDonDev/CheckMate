@@ -59,6 +59,7 @@ const formatTimestampForClient = (timestamp) => {
   if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
     return timestamp.toISOString();
   }
+  // Handle case where it might already be an ISO string (e.g., from previous processing)
   if (typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp)) {
      return timestamp;
   }
@@ -71,11 +72,19 @@ const formatDateTimeForSMS = (dateObj) => {
     if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
         return "Invalid Date";
     }
-    return dateObj.toLocaleString('en-KE', {
+    return dateObj.toLocaleString('en-KE', { // Use appropriate locale
         weekday: 'short', month: 'short', day: 'numeric',
         hour: 'numeric', minute: '2-digit', hour12: true,
-        // timeZone: 'Africa/Nairobi' // Optional
+        // timeZone: 'Africa/Nairobi' // Optional: Specify timezone if needed
     });
+};
+
+// --- Helper Function for Consistent String Formatting (Trim + Uppercase) ---
+const formatStringForQuery = (str) => {
+    if (str && typeof str === 'string') {
+        return str.trim().toUpperCase();
+    }
+    return str; // Return original if not a string or null/undefined
 };
 
 
@@ -149,17 +158,19 @@ router.post('/', checkAuth, async (req, res) => {
     // --- End Validation ---
 
     // --- Prepare Lecture Data for Firestore ---
+    // Use helper for consistent formatting
     const newLectureData = {
       lecturerId: authUserId,
       lecturerName: userData.name || 'N/A',
       lecturerPhone: lecturerPhone || userData.phoneNumber || null,
-      school: school.trim(),
-      department: department.trim(),
-      course: course.trim(),
-      yearOfStudy: yearOfStudy.trim(),
-      semester: semester.trim(),
-      unitName: unitName.trim(),
-      unitCode: unitCode.trim(),
+      // Store consistently (e.g., uppercase)
+      school: formatStringForQuery(school),
+      department: formatStringForQuery(department),
+      course: formatStringForQuery(course),
+      yearOfStudy: formatStringForQuery(yearOfStudy), // Ensure consistency with how student profile stores it
+      semester: formatStringForQuery(semester),     // Ensure consistency with how student profile stores it
+      unitName: unitName.trim(), // Unit name might preserve case
+      unitCode: unitCode.trim().toUpperCase(), // Unit code often uppercase
       lectureDate: parsedLectureDate,
       startTime: parsedStartTime,
       endTime: parsedEndTime,
@@ -177,28 +188,31 @@ router.post('/', checkAuth, async (req, res) => {
     const createdData = createdDoc.data();
     if (!createdData) {
         console.error(`Critical Error: Failed to fetch created lecture data for ID: ${createdLectureId}`);
+        // Don't stop execution, but SMS might fail or be inaccurate
     }
 
     // --- 2. Prepare and Send SMS Notifications ---
     if (twilioClient && createdData) {
         console.log(`Preparing to send SMS notifications for lecture ${createdLectureId}...`);
-        console.log('--- Querying Students With Criteria ---');
+        console.log('--- Querying Students With Criteria (Using formatted values) ---');
         console.log(`Role:        'student'`);
-        console.log(`School:      '${createdData.school}'`);
-        console.log(`Department:  '${createdData.department}'`);
-        console.log(`Course:      '${createdData.course}'`);
-        console.log(`YearOfStudy: '${createdData.yearOfStudy}'`);
-        console.log(`Semester:    '${createdData.semester}'`);
+        console.log(`School:      '${createdData.school}'`); // Value used in query
+        console.log(`Department:  '${createdData.department}'`); // Value used in query
+        console.log(`Course:      '${createdData.course}'`); // Value used in query
+        console.log(`YearOfStudy: '${createdData.yearOfStudy}'`); // Value used in query
+        console.log(`Semester:    '${createdData.semester}'`); // Value used in query
         console.log(`IsVerified:  true`);
         console.log('------------------------------------');
 
+        // Query needs to match how data is stored (e.g., uppercase if stored uppercase)
+        // Ensure the fields in the user profile are also stored consistently (e.g., uppercase)
         const studentsQuery = db.collection(USERS_COLLECTION)
             .where('role', '==', 'student')
-            .where('school', '==', createdData.school)
-            .where('department', '==', createdData.department)
-            .where('course', '==', createdData.course)
-            .where('yearOfStudy', '==', createdData.yearOfStudy)
-            .where('semester', '==', createdData.semester)
+            .where('school', '==', createdData.school) // Assumes user profile also stores uppercase
+            .where('department', '==', createdData.department) // Assumes user profile also stores uppercase
+            .where('course', '==', createdData.course) // Assumes user profile also stores uppercase
+            .where('yearOfStudy', '==', createdData.yearOfStudy) // Assumes user profile also stores uppercase
+            .where('semester', '==', createdData.semester) // Assumes user profile also stores uppercase
             .where('isVerified', '==', true);
 
         try {
@@ -248,6 +262,10 @@ router.post('/', checkAuth, async (req, res) => {
             }
         } catch (queryError) {
             console.error(`Error querying students or sending SMS for lecture ${createdLectureId}:`, queryError);
+            // Check for index errors during student query
+             if (queryError.code === 'failed-precondition' || (queryError.message && queryError.message.includes('index'))) {
+                 console.error("Firestore Index Missing for Student Query: The query to find students requires a composite index. Check the error details for a link to create it in the Firebase console.");
+             }
         }
     } else if (!twilioClient) {
         console.warn(`Twilio client not initialized. Skipping SMS notifications for lecture ${createdLectureId}.`);
@@ -260,6 +278,7 @@ router.post('/', checkAuth, async (req, res) => {
     const responseData = createdData ? {
         id: createdDoc.id,
         ...createdData,
+        // Ensure timestamps are formatted correctly for the client
         lectureDate: formatTimestampForClient(createdData.lectureDate),
         startTime: formatTimestampForClient(createdData.startTime),
         endTime: formatTimestampForClient(createdData.endTime),
@@ -273,7 +292,7 @@ router.post('/', checkAuth, async (req, res) => {
     console.error('Error Stack:', error.stack);
     let errorMessage = 'Internal Server Error: Failed to create lecture or process notifications';
     let statusCode = 500;
-    // ... (keep existing specific error handling) ...
+    // Add more specific error handling if needed
     res.status(statusCode).json({
         error: errorMessage,
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
@@ -287,6 +306,7 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
         const requestedLecturerId = req.params.lecturerId;
         const authUserId = req.userData.userId;
 
+        // Authorization: Ensure the authenticated user is requesting their own lectures
         if (requestedLecturerId !== authUserId) {
             console.log(`Forbidden attempt: User ${authUserId} tried to access lectures for ${requestedLecturerId}`);
             return res.status(403).json({ error: 'Forbidden: You can only access your own lectures.' });
@@ -294,21 +314,24 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
 
         console.log(`Fetching lectures for lecturerId: ${requestedLecturerId}`);
         const lecturesRef = db.collection(LECTURES_COLLECTION);
+        // Query for lectures created by this lecturer
         const snapshot = await lecturesRef
             .where('lecturerId', '==', requestedLecturerId)
-            .orderBy('startTime', 'desc') // Keep ordering as lecturer might want recent first
+            .orderBy('startTime', 'desc') // Order by start time, descending (most recent first)
             .get();
 
         if (snapshot.empty) {
             console.log(`No lectures found for lecturer ${requestedLecturerId}`);
-            return res.json([]);
+            return res.json([]); // Return empty array if no lectures found
         }
 
+        // Map Firestore documents to lecture objects for the response
         const lectures = snapshot.docs.map(doc => {
             const data = doc.data();
             return {
                 id: doc.id,
                 ...data,
+                // Format timestamps for client consistency
                 lectureDate: formatTimestampForClient(data.lectureDate),
                 startTime: formatTimestampForClient(data.startTime),
                 endTime: formatTimestampForClient(data.endTime),
@@ -339,18 +362,25 @@ router.get('/student', checkAuth, async (req, res) => {
         return res.status(404).json({ error: 'Your user profile could not be found.' });
     }
     const studentData = studentDoc.data();
-    const { school, department, course, yearOfStudy, semester, role, isVerified } = studentData;
+    // Use helper to ensure consistent formatting for comparison
+    const profileSchool = formatStringForQuery(studentData.school);
+    const profileDepartment = formatStringForQuery(studentData.department);
+    const profileCourse = formatStringForQuery(studentData.course);
+    // Note: yearOfStudy and semester from profile are NOT used for filtering lectures directly,
+    // only for the percentage calculation. The filters come from req.query.
+    const profileRole = studentData.role;
+    const profileIsVerified = studentData.isVerified;
 
     // 2. Validate Student Role and Profile Fields Needed for Base Filtering
-    if (role !== 'student') {
-         console.error(`User ${studentUserId} is not a student (role: ${role}). Cannot fetch student lectures.`);
+    if (profileRole !== 'student') {
+         console.error(`User ${studentUserId} is not a student (role: ${profileRole}). Cannot fetch student lectures.`);
          return res.status(403).json({ error: 'Forbidden: Only students can access this lecture list.' });
     }
-    if (!school || !department || !course) { // Base fields needed for any query
-        console.error(`Validation Error: Student ${studentUserId} profile is missing required fields (school, dept, course).`);
+    if (!profileSchool || !profileDepartment || !profileCourse) { // Base fields needed for any query
+        console.error(`Validation Error: Student ${studentUserId} profile is missing required fields (school, dept, course). Profile values: School=${profileSchool}, Dept=${profileDepartment}, Course=${profileCourse}`);
         return res.status(400).json({ error: 'Your profile is missing required details (school, department, course) needed to find lectures.' });
     }
-     if (!isVerified) {
+     if (!profileIsVerified) {
          console.warn(`Student ${studentUserId} is not verified. They may not see all lectures.`);
          // Decide if unverified students should see lectures - currently allowing but warning.
     }
@@ -358,40 +388,59 @@ router.get('/student', checkAuth, async (req, res) => {
     // 3. Get and Validate Query Parameters (Year and Semester for filtering)
     const { school: requestedSchool, department: requestedDepartment, course: requestedCourse, year: requestedYear, semester: requestedSemester } = req.query;
     if (!requestedSchool || !requestedDepartment || !requestedCourse || !requestedYear || !requestedSemester) {
-        console.error(`Validation Error: Missing required query parameters (school, dept, course, year, semester) for student ${studentUserId}.`);
+        console.error(`Validation Error: Missing required query parameters (school, dept, course, year, semester) for student ${studentUserId}. Received: school=${requestedSchool}, dept=${requestedDepartment}, course=${requestedCourse}, year=${requestedYear}, semester=${requestedSemester}`);
         return res.status(400).json({ error: 'Required filter parameters (school, department, course, year, semester) were not provided in the request.' });
     }
 
-    // 4. Security Check: Ensure requested school/dept/course match student's profile
-    //    (Prevents students from trying to query lectures outside their scope)
-     if (school !== requestedSchool || department !== requestedDepartment || course !== requestedCourse) {
-        console.error(`Forbidden: Student ${studentUserId} requested filters (${requestedSchool}/${requestedDepartment}/${requestedCourse}) that do not match their profile (${school}/${department}/${course}).`);
+    // 4. Security Check & Data Consistency Check: Ensure requested school/dept/course match student's profile
+    //    Compare consistently (e.g., uppercase)
+    const querySchool = formatStringForQuery(requestedSchool);
+    const queryDepartment = formatStringForQuery(requestedDepartment);
+    const queryCourse = formatStringForQuery(requestedCourse);
+
+    if (profileSchool !== querySchool || profileDepartment !== queryDepartment || profileCourse !== queryCourse) {
+        console.error(`Forbidden: Student ${studentUserId} requested filters (${querySchool}/${queryDepartment}/${queryCourse}) that do not match their profile (${profileSchool}/${profileDepartment}/${profileCourse}).`);
         return res.status(403).json({ error: 'Forbidden: You can only filter lectures for your registered school, department, and course.' });
     }
 
     // 5. Build Firestore Query
-    console.log(`Fetching lectures for student ${studentUserId} with filters: School=${school}, Dept=${department}, Course=${course}, Year=${requestedYear}, Semester=${requestedSemester}`);
+    // Use consistent values for querying (e.g., uppercase)
+    const queryYear = formatStringForQuery(requestedYear); // Use the requested year filter
+    const querySemester = formatStringForQuery(requestedSemester); // Use the requested semester filter
+
+    console.log(`Firestore Query Parameters for student ${studentUserId}:`);
+    console.log(`  school:      '${querySchool}'`);
+    console.log(`  department:  '${queryDepartment}'`);
+    console.log(`  course:      '${queryCourse}'`);
+    console.log(`  yearOfStudy: '${queryYear}'`);
+    console.log(`  semester:    '${querySemester}'`);
 
     const lecturesRef = db.collection(LECTURES_COLLECTION);
     let query = lecturesRef;
 
     // Filter by student's base profile AND the requested year/semester
-    query = query.where('school', '==', school);
-    query = query.where('department', '==', department);
-    query = query.where('course', '==', course);
-    query = query.where('yearOfStudy', '==', requestedYear); // Use the YEAR from query params
-    query = query.where('semester', '==', requestedSemester); // Use the SEMESTER from query params
+    // Ensure the fields in the 'where' clauses EXACTLY match the field names in your Firestore 'lectures' collection
+    // AND that the data was stored consistently (e.g., uppercase)
+    query = query.where('school', '==', querySchool);
+    query = query.where('department', '==', queryDepartment);
+    query = query.where('course', '==', queryCourse);
+    query = query.where('yearOfStudy', '==', queryYear); // Compare lecture's yearOfStudy with the requested year
+    query = query.where('semester', '==', querySemester); // Compare lecture's semester with the requested semester
 
-    // Filter for upcoming lectures (optional, but good practice)
+    // Filter for upcoming lectures (lectures starting from the beginning of today onwards)
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Start of today
     query = query.where('startTime', '>=', today); // Only lectures starting today or later
+    console.log(`  startTime:   >= ${today.toISOString()}`);
 
-    // Order results
+    // Order results by start time ascending
     query = query.orderBy('startTime', 'asc'); // Show earliest upcoming first
+    console.log(`  orderBy:     startTime asc`);
 
     // 6. Execute Query and Process Results
+    console.log("Executing Firestore query...");
     const snapshot = await query.get();
+    console.log(`Firestore query executed. Found ${snapshot.size} documents.`);
 
     if (snapshot.empty) {
         console.log(`No upcoming student lectures found for student ${studentUserId} with the specified filters.`);
@@ -403,6 +452,7 @@ router.get('/student', checkAuth, async (req, res) => {
         return {
             id: doc.id,
             ...data,
+            // Format timestamps for client consistency
             lectureDate: formatTimestampForClient(data.lectureDate),
             startTime: formatTimestampForClient(data.startTime),
             endTime: formatTimestampForClient(data.endTime),
@@ -410,14 +460,16 @@ router.get('/student', checkAuth, async (req, res) => {
         };
     });
 
-    console.log(`Found ${lectures.length} upcoming student lectures for student ${studentUserId}`);
+    console.log(`Successfully processed ${lectures.length} upcoming student lectures for student ${studentUserId}`);
     res.json(lectures);
 
   } catch (error) {
     console.error(`Error getting student lectures for user ${req.userData?.userId}:`, error);
+    console.error('Error Stack:', error.stack); // Log stack trace for detailed debugging
 
+    // Check specifically for Firestore index errors
     if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
-        console.error("Firestore Index Missing: The query requires an index. Check the error details for a link to create it in the Firebase console.");
+        console.error("Firestore Index Missing: The query requires an index. Check the error details for a link to create it in the Firebase console. Index likely needs fields: school (ASC), department (ASC), course (ASC), yearOfStudy (ASC), semester (ASC), startTime (ASC)");
         return res.status(500).json({
             error: 'Internal Server Error: Failed to get student lectures due to missing database index.',
             details: 'A required Firestore index is missing. Please check backend logs or Firebase console for a creation link.'
@@ -546,6 +598,8 @@ router.delete('/:lectureId', checkAuth, async (req, res) => {
         batch.delete(lectureRef);
         console.log(`Scheduled deletion for lecture document: ${lectureId}`);
 
+        // Find and schedule deletion for associated attendance records
+        // This query requires an index on lectureId in the attendance collection
         const attendanceQuery = db.collection(ATTENDANCE_COLLECTION).where('lectureId', '==', lectureId);
         const attendanceSnapshot = await attendanceQuery.get();
 
@@ -565,6 +619,10 @@ router.delete('/:lectureId', checkAuth, async (req, res) => {
     } catch (error) {
         console.error(`Error deleting lecture ${lectureId}:`, error);
         console.error('Error Stack:', error.stack);
+        // Check specifically for Firestore index errors if attendance query fails
+        if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
+             console.error("Firestore Index Missing for Deletion: The query to find attendance records requires an index on 'lectureId'. Check the error details for a link to create it.");
+        }
         return res.status(500).json({
             message: 'Internal server error while deleting lecture.',
             details: process.env.NODE_ENV !== 'production' ? error.message : undefined

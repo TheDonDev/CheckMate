@@ -41,6 +41,7 @@ class AuthService extends ChangeNotifier {
 
       if (userDoc.exists) {
         // Create our custom User object from the Firestore data
+        // Data read from Firestore will reflect the case it was saved in (e.g., uppercase fields)
         final user = app_user.User.fromFirestore(userDoc);
 
         // Update cache and notify listeners only if the user data has changed
@@ -87,15 +88,6 @@ class AuthService extends ChangeNotifier {
     final fb_auth.User? firebaseUser = authUser ?? _firebaseAuth.currentUser;
     if (firebaseUser == null) return;
 
-    // --- Add check: Do not sync for the special user if they are NOT verified in Firebase Auth ---
-    // This prevents overwriting a potentially manually set 'isVerified: true' in Firestore
-    // if they log in before actually verifying via email link.
-    // The backend bypass allows lecture creation regardless of Firestore 'isVerified'.
-    // However, if they *do* verify via email, we *should* update Firestore.
-    // if (firebaseUser.email?.toLowerCase() == _specialBypassEmail && !firebaseUser.emailVerified) {
-    //   print('syncFirestoreVerificationStatus: Skipping sync for bypass user ${_specialBypassEmail} as they are not verified in Firebase Auth.');
-    //   return;
-    // }
     // --- Revised Logic: Always try to reload, then check verification ---
     // The stream logic above already prevents calling this unnecessarily for the bypass user
     // if they aren't verified in Auth. If this function *is* called, proceed as normal.
@@ -122,7 +114,9 @@ class AuthService extends ChangeNotifier {
             print('syncFirestoreVerificationStatus: Updating Firestore isVerified for ${refreshedFirebaseUser.uid}...');
             await userDocRef.update({'isVerified': true});
             print('syncFirestoreVerificationStatus: Firestore isVerified field updated successfully.');
-            await refreshCurrentUser(); // Optional: Refresh local cache immediately
+            // Refresh local cache immediately after successful Firestore update
+            // Use await here to ensure refresh completes before potential subsequent reads
+            await refreshCurrentUser();
           }
         } else {
           print('syncFirestoreVerificationStatus: Warning - Firestore document not found for user ${refreshedFirebaseUser.uid}.');
@@ -150,14 +144,26 @@ class AuthService extends ChangeNotifier {
     String? yearOfStudy,
     String? semester,
   }) async {
-    if (name.isEmpty || email.isEmpty || password.isEmpty || phoneNumber.isEmpty || school == null || department == null || course == null) {
-       throw AuthException('Please fill in all required fields.');
+    // Trim inputs early, apply case changes just before saving
+    final trimmedName = name.trim();
+    final trimmedEmail = email.trim().toLowerCase(); // Keep email lowercase
+    final trimmedPhoneNumber = phoneNumber.trim();
+    final trimmedRegNumber = registrationNumber?.trim();
+    // Trim optional year/semester fields before uppercasing
+    final trimmedYearOfStudy = yearOfStudy?.trim();
+    final trimmedSemester = semester?.trim();
+
+    // Validate required fields (use trimmed versions where applicable)
+    if (trimmedName.isEmpty || trimmedEmail.isEmpty || password.isEmpty || trimmedPhoneNumber.isEmpty ||
+        school == null || school.trim().isEmpty ||
+        department == null || department.trim().isEmpty ||
+        course == null || course.trim().isEmpty) {
+       throw AuthException('Please fill in all required fields (Name, Email, Phone, School, Department, Course).');
     }
-    final trimmedEmail = email.trim().toLowerCase(); // Use lowercase for comparison
 
     try {
       fb_auth.UserCredential userCredential = await _firebaseAuth.createUserWithEmailAndPassword(
-        email: trimmedEmail, // Use trimmed/lowercase email
+        email: trimmedEmail, // Use trimmed/lowercase email for Auth
         password: password,
       );
       fb_auth.User? firebaseUser = userCredential.user;
@@ -176,34 +182,44 @@ class AuthService extends ChangeNotifier {
         }
 
         final bool isStudent = trimmedEmail.endsWith('@student.au.ac.ke');
-        final String role = isStudent ? 'student' : 'lecturer';
+        final String role = isStudent ? 'student' : 'lecturer'; // Role likely lowercase
 
-        if (isStudent && (registrationNumber == null || registrationNumber.trim().isEmpty || yearOfStudy == null || semester == null)) {
+        // Validate student-specific fields (use trimmed versions)
+        if (isStudent && (trimmedRegNumber == null || trimmedRegNumber.isEmpty || trimmedYearOfStudy == null || trimmedYearOfStudy.isEmpty || trimmedSemester == null || trimmedSemester.isEmpty)) {
             throw AuthException('Student registration requires Registration Number, Year of Study, and Semester.');
         }
 
-        // --- MODIFICATION: Set isVerified true ONLY for the special user during signup ---
+        // Set isVerified true ONLY for the special user during signup
         final bool initialVerificationStatus = (trimmedEmail == _specialBypassEmail);
 
+        // --- MODIFICATION: Apply .toUpperCase() to specific fields before saving ---
         Map<String, dynamic> userData = {
           'uid': firebaseUser.uid,
-          'name': name.trim(),
-          'email': trimmedEmail, // Store trimmed/lowercase email
-          'phoneNumber': phoneNumber.trim(),
-          'role': role,
-          'school': school,
-          'department': department,
-          'course': course,
+          'name': trimmedName.toUpperCase(), // Save name in uppercase
+          'email': trimmedEmail, // Save email in lowercase
+          'phoneNumber': trimmedPhoneNumber, // Save phone number as trimmed
+          'role': role, // Save role as determined (likely lowercase)
+          'school': school.trim().toUpperCase(), // Save school trimmed & uppercase
+          'department': department.trim().toUpperCase(), // Save department trimmed & uppercase
+          'course': course.trim().toUpperCase(), // Save course trimmed & uppercase
           'createdAt': FieldValue.serverTimestamp(),
-          'isVerified': initialVerificationStatus, // Set based on email match
-          'registrationNumber': isStudent ? registrationNumber?.trim() : null,
-          'yearOfStudy': isStudent ? yearOfStudy : null,
-          'semester': isStudent ? semester : null,
+          'isVerified': initialVerificationStatus,
+          // Save registration number in uppercase only if student and provided
+          'registrationNumber': isStudent ? trimmedRegNumber?.toUpperCase() : null,
+          // *** Save year/semester trimmed & uppercase only if student and provided ***
+          'yearOfStudy': isStudent ? trimmedYearOfStudy?.toUpperCase() : null,
+          'semester': isStudent ? trimmedSemester?.toUpperCase() : null,
         };
+        // Remove any keys where the value is null (like registrationNumber for non-students)
         userData.removeWhere((key, value) => value == null);
+        // --- END MODIFICATION ---
 
         await _firestore.collection(_usersCollection).doc(firebaseUser.uid).set(userData);
-        print("User document created in Firestore for UID: ${firebaseUser.uid} with isVerified: $initialVerificationStatus");
+        print("User document created in Firestore for UID: ${firebaseUser.uid} with isVerified: $initialVerificationStatus and specified fields in uppercase.");
+
+        // --- Refresh local user cache after successful signup and Firestore write ---
+        // This ensures the _currentUser reflects the newly created user data immediately
+        await _userFromFirebaseUser(firebaseUser); // Fetch and cache the new user data
 
       } else {
          throw AuthException('User registration failed unexpectedly. Please try again.');
@@ -264,21 +280,27 @@ class AuthService extends ChangeNotifier {
       // Run asynchronously. This will update Firestore if the user *is* verified in Auth.
       // It won't run if the stream listener already decided not to call it for the bypass user.
       // Or if called, it will correctly update Firestore if the bypass user *did* verify.
-      syncFirestoreVerificationStatus(authUser: freshFbUser);
+      // Use await here to ensure sync completes before fetching user data,
+      // especially if sync might update the isVerified status we rely on.
+      await syncFirestoreVerificationStatus(authUser: freshFbUser);
 
 
       // 5. Fetch custom user data from Firestore
+      // This will now read the potentially uppercase fields saved during signup
       final appUser = await _userFromFirebaseUser(freshFbUser);
 
       if (appUser == null) {
-        // Inconsistency: Auth user exists, Firestore data doesn't
-        print("Login failed: User data not found in database for UID ${freshFbUser.uid}. Logging out.");
+        // Inconsistency: Auth user exists, Firestore data doesn't OR failed to fetch
+        // _userFromFirebaseUser already handles the specific case of missing doc vs fetch error
+        // If it returns null after a successful login, something is wrong.
+        print("Login failed: Could not retrieve user data from database for UID ${freshFbUser.uid} after login. Logging out.");
         await _firebaseAuth.signOut(); // Sign out to prevent bad state
-        throw AuthException('Login failed: User data incomplete. Please contact support.');
+        throw AuthException('Login failed: User data incomplete or inaccessible. Please contact support.');
       }
 
       // 6. Login successful
       // Include whether the bypass was used in the log message
+      // Note: appUser.isVerified now reflects the value from Firestore (which syncFirestoreVerificationStatus might have just updated)
       final verificationStatus = isSpecialUser ? "Verified (Bypass)" : (appUser.isVerified ? "Verified" : "Not Verified");
       print("Login successful for ${appUser.email}, Role: ${appUser.role}, Status: $verificationStatus");
       return appUser;
@@ -314,15 +336,19 @@ class AuthService extends ChangeNotifier {
     // --- End check ---
 
     try {
+      // Reload first to ensure we have the latest verification status
       await fbUser.reload();
-      final freshFbUser = _firebaseAuth.currentUser;
+      final freshFbUser = _firebaseAuth.currentUser; // Get the reloaded instance
 
       if (freshFbUser == null) {
+         // Should not happen if fbUser was not null, but check defensively
          throw AuthException('Could not find user session after refresh. Please log in again.');
       }
 
       if (freshFbUser.emailVerified) {
         print('Email ${freshFbUser.email} is already verified.');
+        // Sync Firestore just in case it wasn't updated before
+        await syncFirestoreVerificationStatus(authUser: freshFbUser);
         throw AuthException('Your email address is already verified.');
       }
 
@@ -343,12 +369,13 @@ class AuthService extends ChangeNotifier {
 
   // --- Password Reset Method ---
   Future<void> sendPasswordResetEmail(String email) async {
-    if (email.trim().isEmpty) {
+    final trimmedEmail = email.trim(); // Trim before check and use
+    if (trimmedEmail.isEmpty) {
        throw AuthException('Please enter your email address.');
     }
     try {
-      await _firebaseAuth.sendPasswordResetEmail(email: email.trim());
-      print("Password reset email sent to ${email.trim()}");
+      await _firebaseAuth.sendPasswordResetEmail(email: trimmedEmail);
+      print("Password reset email sent to $trimmedEmail");
     } on fb_auth.FirebaseAuthException catch (e) {
       print("FirebaseAuthException during password reset: ${e.code} - ${e.message}");
       throw AuthException(_handleFirebaseAuthError(e));
@@ -371,6 +398,7 @@ class AuthService extends ChangeNotifier {
       }
     } catch (e) {
       print("Error during sign out: $e");
+      // Optionally rethrow or handle specific sign-out errors if needed
     }
   }
 
@@ -381,28 +409,53 @@ class AuthService extends ChangeNotifier {
   Future<app_user.User?> refreshCurrentUser() async {
      print("Manual user refresh triggered.");
      final fbUser = _firebaseAuth.currentUser;
+     app_user.User? appUser; // Declare appUser outside try-catch
+
      if (fbUser != null) {
        try {
           await fbUser.reload(); // Reload Firebase user data
+          // Fetch Firestore data again using the potentially reloaded user
+          // Do this *after* reload but *before* sync, as sync might depend on fresh data
+          appUser = await _userFromFirebaseUser(_firebaseAuth.currentUser);
+
+          // Sync status after refresh as well
+          // Use the most recent firebase user instance
+          final currentFbUser = _firebaseAuth.currentUser;
+          if (currentFbUser != null) {
+              // Same logic as in the stream listener
+              if (currentFbUser.email?.toLowerCase() != _specialBypassEmail || currentFbUser.emailVerified) {
+                 // Run sync, but don't necessarily wait for it unless critical path depends on it
+                 // Using await here ensures the sync completes before returning the potentially updated user
+                 await syncFirestoreVerificationStatus(authUser: currentFbUser);
+                 // Re-fetch user data *after* sync if sync might change isVerified status
+                 // This ensures the returned user reflects the absolute latest state
+                 appUser = await _userFromFirebaseUser(currentFbUser);
+              }
+          }
+
        } catch (e) {
-          print("Error reloading Firebase user: $e");
+          print("Error during manual user refresh process: $e");
           if (e is fb_auth.FirebaseAuthException && (e.code == 'user-token-expired' || e.code == 'user-disabled' || e.code == 'user-not-found')) {
              await logout(); // Force logout if session is invalid
              throw AuthException('Session invalid or user disabled. Please log in again.');
+          } else if (e is AuthException) {
+             rethrow; // Rethrow custom auth exceptions from nested calls
           }
-          // Log other reload errors but continue
+          // Log other errors but might still return potentially stale appUser if fetch succeeded before error
+          // Or return null if fetch also failed or happened after error
+          // Consider throwing a generic refresh error here if needed:
+          // throw AuthException('Failed to fully refresh user data.');
        }
-     }
-     // Fetch Firestore data again using the potentially reloaded user
-     final appUser = await _userFromFirebaseUser(_firebaseAuth.currentUser);
-     // Sync status after refresh as well
-     if (_firebaseAuth.currentUser != null) {
-        // Same logic as in the stream listener
-        if (_firebaseAuth.currentUser!.email?.toLowerCase() != _specialBypassEmail || _firebaseAuth.currentUser!.emailVerified) {
-           syncFirestoreVerificationStatus(authUser: _firebaseAuth.currentUser!);
+     } else {
+        // If there's no Firebase user, ensure local state is also null
+        if (_currentUser != null) {
+           _currentUser = null;
+           notifyListeners();
         }
+        appUser = null;
      }
-     return appUser;
+
+     return appUser; // Return the fetched (and potentially updated) app user
   }
 
   // --- Helper to map Firebase Auth errors ---
@@ -413,10 +466,12 @@ class AuthService extends ChangeNotifier {
        case 'invalid-email': return 'The email address is not valid.';
        case 'user-not-found': return 'No user found for that email address.';
        case 'wrong-password': return 'Invalid password provided for that user.';
-       case 'invalid-credential': return 'Invalid email or password.';
+       case 'invalid-credential': return 'Invalid email or password.'; // More generic for login
        case 'user-disabled': return 'This user account has been disabled.';
        case 'too-many-requests': return 'Too many requests. Please try again later.';
        case 'missing-email': return 'Please enter your email address.';
+       // Consider adding network errors if applicable, though often caught higher up
+       // case 'network-request-failed': return 'Network error. Please check your connection.';
        default: return 'An unknown authentication error occurred (${e.code})';
      }
   }
