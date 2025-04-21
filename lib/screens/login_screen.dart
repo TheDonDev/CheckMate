@@ -30,7 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color brandColor = Color(0xFF0175C2);
 
   // --- Support Contact Details ---
-  // TODO: Replace with your actual support email address
+  // TODO: Replace with actual support email address
   final String _supportEmail = 'support@checkmateapp.example.com';
   final String _supportSubject = 'Checkmate App Support Request';
   // --- End Support Contact Details ---
@@ -333,7 +333,7 @@ Email used (if different): ${enteredEmail.isNotEmpty ? enteredEmail : '[Please e
                         style: TextButton.styleFrom(foregroundColor: Colors.grey[600]), // Subtle color
                         child: const Text('Forgot Password?'),
                       ),
-                      const SizedBox(height: 10), // Add some space before support
+                      const SizedBox(height: 10), // Adds some space before support
                       // --- *** NEW: Contact Support Button *** ---
                       TextButton.icon(
                         icon: Icon(Icons.support_agent_outlined, size: 18, color: Colors.grey[700]),
@@ -341,7 +341,7 @@ Email used (if different): ${enteredEmail.isNotEmpty ? enteredEmail : '[Please e
                         onPressed: _isLoading ? null : _contactSupport,
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          // Optional: Add a subtle border or background on hover/press
+                          // Optional: To add a subtle border or background on hover/press
                         ),
                       ),
                       // --- *** END: Contact Support Button *** ---
