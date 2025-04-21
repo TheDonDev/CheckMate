@@ -91,7 +91,7 @@ class ApiService {
         } else {
            if (kDebugMode) print("Warning: Could not get ID token for authenticated user.");
            // Depending on API requirements, might need to throw here
-           // throw ApiException("Authentication token unavailable.", statusCode: 401);
+           throw ApiException("Authentication token unavailable.", statusCode: 401);
         }
       } catch (e) {
          if (kDebugMode) print("Error getting ID token: $e");
@@ -102,7 +102,7 @@ class ApiService {
        if (kDebugMode) print("Warning: No authenticated user found for API request.");
        // Throw an exception if authentication is strictly required for this endpoint
        // Example: For endpoints other than login/signup
-       // throw ApiException("User not authenticated. Please log in.", statusCode: 401);
+       throw ApiException("User not authenticated. Please log in.", statusCode: 401);
     }
     return headers;
   }
@@ -119,7 +119,7 @@ class ApiService {
       try {
         // Handle 204 No Content specifically
         if (response.statusCode == HttpStatus.noContent || responseBody.isEmpty) {
-          return null;
+          return null; // Indicate success with no body
         }
         // Decode JSON for other successful responses
         return jsonDecode(responseBody);
@@ -237,12 +237,43 @@ class ApiService {
     }
   }
 
+  /// Deletes a lecture via the backend API.
+  /// Requires authentication, backend must verify ownership.
+  Future<void> deleteLecture(String lectureId) async {
+    // Endpoint assumes backend route is DELETE /lectures/{lectureId}
+    final uri = Uri.parse('$_baseUrl/lectures/$lectureId');
+    if (kDebugMode) print("API Request: DELETE $uri");
+    try {
+      final response = await http.delete(
+        uri,
+        headers: await _getHeaders(includeContentType: false), // Auth needed, no body
+      );
+      // _handleResponse will throw ApiException on non-2xx status codes
+      _handleResponse(response);
+      // If no exception is thrown, deletion was successful (e.g., 200 OK or 204 No Content)
+      return;
+    } catch (e) {
+        if (kDebugMode) print("Error in deleteLecture: $e");
+        // Provide more specific feedback based on potential API error messages
+        if (e is ApiException) {
+            if (e.statusCode == 403) { // Forbidden
+                throw ApiException('Unauthorized: You do not have permission to delete this lecture.', statusCode: e.statusCode);
+            } else if (e.statusCode == 404) { // Not Found
+                throw ApiException('Delete failed: Lecture not found.', statusCode: e.statusCode);
+            }
+            rethrow; // Rethrow other specific API exceptions
+        }
+        // Wrap generic errors
+        throw ApiException("Failed to delete lecture: ${e.toString()}");
+    }
+  }
+
   // --- Attendance API Methods ---
 
   /// Allows a student to join a lecture.
   /// Backend uses the auth token to get studentId and profile details.
   Future<AttendanceRecord> joinLecture(String lectureId) async {
-    // Endpoint assumes backend route is POST /attendance/join/:lectureId
+    // Endpoint assumes backend route is POST /attendance/join/{lectureId}
     // No request body needed as backend uses token and path param
     final uri = Uri.parse('$_baseUrl/attendance/join/$lectureId');
     if (kDebugMode) print("API Request: POST $uri");
@@ -262,7 +293,6 @@ class ApiService {
   }
 
   /// Allows a lecturer to check in a student using their registration number.
-  // *** CORRECTED SIGNATURE: Removed lecturerId parameter ***
   Future<AttendanceRecord> checkInStudent(String lectureId, String registrationNumber) async {
     // Endpoint assumes backend route is POST /attendance/checkin
     final uri = Uri.parse('$_baseUrl/attendance/checkin');

@@ -1,6 +1,6 @@
 // lib/screens/lecture_attendance_screen.dart
 import 'dart:io'; // For File operations
-import 'dart:typed_data'; // For Uint8List
+// For Uint8List
 import 'dart:ui' as ui; // For Image rendering
 
 import 'package:checkmate/models/attendance_record.dart';
@@ -37,7 +37,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
 
   // GlobalKey to capture the QR code widget
   final GlobalKey _qrKey = GlobalKey();
-  bool _isProcessingQrShare = false; // Loading state for sharing
+  // Removed _isProcessingQrShare from here as it's managed locally in the dialog's StatefulBuilder
 
   @override
   void initState() {
@@ -56,16 +56,12 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     });
   }
 
-  // --- Function to Capture and Share QR Code ---
+  // --- Function to Capture and Share/Save QR Code ---
   Future<void> _captureAndShareQrCode() async {
-    // This function is now called within the StatefulBuilder of the dialog,
-    // so we don't need to manage the _isProcessingQrShare state here directly.
-    // The setDialogState in the button's onPressed handles the UI update.
+    // Loading state is managed by the dialog's StatefulBuilder
 
     try {
       // 1. Find the RenderRepaintBoundary
-      // Ensure the context used here is valid when the button is pressed.
-      // The _qrKey.currentContext should be available if the dialog is open.
       if (_qrKey.currentContext == null) {
         throw Exception("QR Code context not found. Dialog might be closed.");
       }
@@ -83,10 +79,9 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
 
       // 4. Get Temporary Directory
       final tempDir = await getTemporaryDirectory();
-      // Sanitize filename (replace spaces, slashes etc.)
+      // Sanitize filename
       final safeUnitCode = widget.lecture.unitCode.replaceAll(RegExp(r'[^\w\.-]'), '_');
       final safeUnitName = widget.lecture.unitName.replaceAll(RegExp(r'[^\w\.-]'), '_');
-      // Use a simpler timestamp format if needed
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final fileName = 'QRCode_${safeUnitCode}_${safeUnitName}_$timestamp.png';
       final file = File('${tempDir.path}/$fileName');
@@ -96,28 +91,39 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       print('QR Code saved temporarily to: ${file.path}'); // Debug log
 
       // 6. Share File using share_plus
-      final xFile = XFile(file.path); // Create XFile for sharing
-      // Use Share.shareXFiles for sharing files
+      final xFile = XFile(file.path);
       final result = await Share.shareXFiles(
         [xFile],
         text: 'QR Code for ${widget.lecture.unitName} (${widget.lecture.unitCode}) lecture.',
-        subject: 'Lecture QR Code: ${widget.lecture.unitCode}', // Subject for email etc.
+        subject: 'Lecture QR Code: ${widget.lecture.unitCode}',
       );
 
-      // Optional: Handle share result (e.g., log completion status)
+      // Handle share result
       if (result.status == ShareResultStatus.success) {
-        print('QR Code shared successfully.');
+        print('QR Code shared/saved successfully.');
+        // Optionally show a success message if needed, though the share sheet closing is often enough feedback
+        // if (mounted) {
+        //   ScaffoldMessenger.of(context).showSnackBar(
+        //     const SnackBar(content: Text('QR Code prepared!'), backgroundColor: Colors.green),
+        //   );
+        // }
+      } else if (result.status == ShareResultStatus.dismissed) {
+         print('Share sheet dismissed.');
       } else {
         print('Sharing status: ${result.status}');
+        // Optionally show a message if sharing was unavailable or failed
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not complete action: ${result.status}'), backgroundColor: Colors.orange),
+          );
+        }
       }
 
     } catch (e) {
       print("Error capturing or sharing QR code: $e");
-      // Show error message using the main screen's context if possible,
-      // or consider passing the dialog context if needed.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error sharing QR code: ${e.toString()}'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error preparing QR code: ${e.toString()}'), backgroundColor: Colors.red),
         );
       }
     }
@@ -228,12 +234,14 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
               ),
               actionsAlignment: MainAxisAlignment.center,
               actions: <Widget>[
-                // --- Share Button ---
+                // --- Download/Share Button ---
                 ElevatedButton.icon(
+                  // --- UPDATED ICON ---
                   icon: isDialogProcessingShare
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: LectureAttendanceScreen.brandColor))
-                      : const Icon(Icons.share, size: 20),
-                  label: Text(isDialogProcessingShare ? 'Processing...' : 'Share / Save'),
+                      : const Icon(Icons.download_outlined, size: 20), // Changed to Download icon
+                  // --- UPDATED LABEL ---
+                  label: Text(isDialogProcessingShare ? 'Processing...' : 'Download'), // Updated label
                   style: ElevatedButton.styleFrom(
                      foregroundColor: LectureAttendanceScreen.brandColor, // Text color
                      backgroundColor: LectureAttendanceScreen.brandColor.withOpacity(0.1), // Lighter background
@@ -246,6 +254,10 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                      setDialogState(() { isDialogProcessingShare = true; });
                      try {
                         await _captureAndShareQrCode();
+                        // Optional: Close dialog automatically after share sheet is dismissed/action taken
+                        // if (dialogContext.mounted) {
+                        //   Navigator.of(dialogContext).pop();
+                        // }
                      } finally {
                         // Check if dialog is still mounted before resetting state
                         // Using 'context' from StatefulBuilder which should be valid here

@@ -3,10 +3,11 @@ import 'package:checkmate/screens/register_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
-// Import dashboards directly (Wrapper handles the main navigation, but direct import is fine here)
+// Import dashboards directly
 import 'package:checkmate/screens/student_dashboard.dart';
 import 'package:checkmate/screens/lecturer_dashboard.dart';
 import 'package:provider/provider.dart'; // Import Provider
+import 'package:url_launcher/url_launcher.dart'; // Import url_launcher
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,6 +28,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // Define the brand color (consistent styling)
   static const Color brandColor = Color(0xFF0175C2);
+
+  // --- Support Contact Details ---
+  // TODO: Replace with your actual support email address
+  final String _supportEmail = 'support@checkmateapp.example.com';
+  final String _supportSubject = 'Checkmate App Support Request';
+  // --- End Support Contact Details ---
 
   @override
   void dispose() {
@@ -54,35 +61,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- Login Action ---
   Future<void> _handleLogin() async {
-    // 1. Validate the form fields
     if (!_formKey.currentState!.validate()) {
       _showSnackBar('Please fix the errors in the form.', isError: true);
-      return; // Don't proceed if form is invalid
+      return;
     }
-
-    // Access AuthService using Provider
     final authService = Provider.of<AuthService>(context, listen: false);
-
-    // Check mount status before async operation
     if (!mounted) return;
-    setState(() { _isLoading = true; }); // Show loading indicator
+    setState(() { _isLoading = true; });
 
     try {
-      // 2. Call the login method in AuthService
-      // --- CORRECTION: Removed the 'skipEmailVerification' parameter ---
       app_user.User? user = await authService.login(
-        _emailController.text.trim(), // Trim whitespace from email
-        _passwordController.text,     // Password (no trim needed)
-        // No skipEmailVerification parameter needed here anymore
+        _emailController.text.trim(),
+        _passwordController.text,
       );
-      // --- END CORRECTION ---
-
-      // 3. Check mount status AGAIN after the async login call completes
       if (!mounted) return;
-
-      // 4. Handle successful login
       if (user != null) {
-        // Navigate to the appropriate dashboard based on the user's role
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -91,62 +84,41 @@ class _LoginScreenState extends State<LoginScreen> {
                 : StudentDashboard(currentUser: user),
           ),
         );
-        return; // Exit function after successful navigation
+        return;
       } else {
-         // Less likely case, but handle if user data fetch fails silently
          _showSnackBar('Login failed: Could not retrieve user details.');
       }
-
     } on AuthException catch (e) {
-      // 5. Handle specific authentication errors
-      if (mounted) {
-        // Show user-friendly error message from AuthService
-        // If email not verified, the message will prompt user to check email/resend
-        _showSnackBar(e.message, isError: true);
-      }
+      if (mounted) { _showSnackBar(e.message, isError: true); }
     } catch (e) {
-       // 6. Handle unexpected errors
        if (mounted) {
          print("Unexpected login error: $e");
          _showSnackBar('An unexpected error occurred. Please try again.', isError: true);
        }
     } finally {
-      // 7. Ensure loading indicator is turned off if the widget is still mounted
-      if (mounted) {
-        setState(() { _isLoading = false; });
-      }
+      if (mounted) { setState(() { _isLoading = false; }); }
     }
   }
 
   // --- Resend Verification Email Action ---
   Future<void> _handleResendVerification() async {
      final authService = Provider.of<AuthService>(context, listen: false);
-
-     // The service method now uses the currently authenticated user (if any)
-
      if (!mounted) return;
-     setState(() { _isLoading = true; }); // Show loading briefly
+     setState(() { _isLoading = true; });
 
      try {
-       // Call without email parameter
        await authService.resendVerificationEmail();
-
        if (!mounted) return;
-       // Show generic success message, AuthService handles specific cases like already verified
        _showSnackBar('Verification email resent successfully. Please check your inbox (and spam folder).', isError: false);
      } on AuthException catch (e) {
-       // Handle errors from AuthService (e.g., "already verified", "no user session", "too many requests")
        if (!mounted) return;
        _showSnackBar(e.message, isError: true);
      } catch (e) {
-       // Handle unexpected errors
        if (!mounted) return;
        print("Unexpected resend error: $e");
        _showSnackBar('An unexpected error occurred while resending email.', isError: true);
      } finally {
-       if (mounted) {
-         setState(() { _isLoading = false; });
-       }
+       if (mounted) { setState(() { _isLoading = false; }); }
      }
   }
 
@@ -155,36 +127,25 @@ class _LoginScreenState extends State<LoginScreen> {
     final authService = Provider.of<AuthService>(context, listen: false);
     final email = _emailController.text.trim();
 
-    // Validate if email field has something that looks like an email
     if (email.isEmpty || !email.contains('@')) {
       _showSnackBar('Please enter your email address first to reset password.', isError: true);
       return;
     }
-
     if (!mounted) return;
-    // Optional: Show a confirmation dialog before sending
     bool confirmSend = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reset Password'),
         content: Text('Send a password reset link to $email?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false), // Cancel
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true), // Confirm
-            child: const Text('Send'),
-            style: TextButton.styleFrom(foregroundColor: brandColor),
-          ),
+          TextButton( onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'), ),
+          TextButton( onPressed: () => Navigator.of(context).pop(true), child: const Text('Send'), style: TextButton.styleFrom(foregroundColor: brandColor), ),
         ],
       ),
-    ) ?? false; // Default to false if dialog dismissed
+    ) ?? false;
 
-    if (!confirmSend || !mounted) return; // Exit if user cancelled or widget unmounted
-
-    setState(() { _isLoading = true; }); // Show loading
+    if (!confirmSend || !mounted) return;
+    setState(() { _isLoading = true; });
 
     try {
       await authService.sendPasswordResetEmail(email);
@@ -198,11 +159,50 @@ class _LoginScreenState extends State<LoginScreen> {
       print("Unexpected password reset error: $e");
       _showSnackBar('An unexpected error occurred.', isError: true);
     } finally {
-      if (mounted) {
-        setState(() { _isLoading = false; });
-      }
+      if (mounted) { setState(() { _isLoading = false; }); }
     }
   }
+
+  // --- *** NEW: Contact Support Action *** ---
+  Future<void> _contactSupport() async {
+    // Try to pre-fill the user's entered email if available
+    final enteredEmail = _emailController.text.trim();
+    final String emailBody = '''
+Please describe the issue you are experiencing below:
+
+------------------------------------
+App Version: [App Version, e.g., 1.0.0] (Optional)
+Device: [Device Model, e.g., Samsung S21] (Optional)
+Operating System: [OS Version, e.g., Android 13] (Optional)
+Email used (if different): ${enteredEmail.isNotEmpty ? enteredEmail : '[Please enter email used for login/register]'}
+------------------------------------
+
+'''; // Use triple quotes for multi-line string
+
+    // Encode subject and body for the mailto link
+    final Uri mailtoUri = Uri(
+      scheme: 'mailto',
+      path: _supportEmail,
+      queryParameters: {
+        'subject': _supportSubject,
+        'body': emailBody,
+      },
+    );
+
+    try {
+      // Check if the URL can be launched
+      if (await canLaunchUrl(mailtoUri)) {
+        await launchUrl(mailtoUri);
+      } else {
+        // If mailto fails, show the email address so the user can copy it
+        _showSnackBar('Could not open email app. Please contact $_supportEmail', isError: true);
+      }
+    } catch (e) {
+      print("Error launching mailto link: $e");
+      _showSnackBar('Could not open email app. Please contact $_supportEmail', isError: true);
+    }
+  }
+  // --- *** END: Contact Support Action *** ---
 
 
   @override
@@ -307,7 +307,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: const Text('Login'),
                         ),
                   const SizedBox(height: 20),
-                  // Register, Resend, Forgot Password Buttons
+                  // Register, Resend, Forgot Password, Contact Support Buttons
                   Column(
                     children: [
                       Row(
@@ -315,17 +315,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         children: [
                           TextButton(
                             onPressed: _isLoading ? null : () {
-                              // Navigate to RegisterScreen
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                              );
+                              Navigator.push( context, MaterialPageRoute(builder: (context) => const RegisterScreen()), );
                             },
                             style: TextButton.styleFrom(foregroundColor: brandColor),
                             child: const Text("Register here"),
                           ),
                            TextButton(
-                            // Use the corrected handler
                             onPressed: _isLoading ? null : _handleResendVerification,
                             style: TextButton.styleFrom(foregroundColor: colorScheme.secondary), // Or brandColor
                             child: const Text('Resend Email'),
@@ -338,6 +333,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: TextButton.styleFrom(foregroundColor: Colors.grey[600]), // Subtle color
                         child: const Text('Forgot Password?'),
                       ),
+                      const SizedBox(height: 10), // Add some space before support
+                      // --- *** NEW: Contact Support Button *** ---
+                      TextButton.icon(
+                        icon: Icon(Icons.support_agent_outlined, size: 18, color: Colors.grey[700]),
+                        label: Text('Contact Support', style: TextStyle(color: Colors.grey[700])),
+                        onPressed: _isLoading ? null : _contactSupport,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          // Optional: Add a subtle border or background on hover/press
+                        ),
+                      ),
+                      // --- *** END: Contact Support Button *** ---
                     ],
                   ),
                 ],

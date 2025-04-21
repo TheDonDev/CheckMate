@@ -34,6 +34,7 @@ if (!accountSid || !authToken || !messagingServiceSid) {
 // --- Constants ---
 const LECTURES_COLLECTION = 'lectures';
 const USERS_COLLECTION = 'users';
+const ATTENDANCE_COLLECTION = 'attendance'; // Added for deleting attendance records
 
 // --- Helper Function for Timestamp Conversion (Client -> Firestore) ---
 const parseDateForFirestore = (dateInput) => {
@@ -200,27 +201,26 @@ router.post('/', checkAuth, async (req, res) => {
         console.log(`Preparing to send SMS notifications for lecture ${createdLectureId}...`);
 
         // --- Log the EXACT criteria being used for the student query ---
-        // This is CRUCIAL for debugging the "No matching students" issue.
         console.log('--- Querying Students With Criteria ---');
-        console.log(`Role:        'student'`); // Hardcoded in query
+        console.log(`Role:        'student'`);
         console.log(`School:      '${createdData.school}'`);
         console.log(`Department:  '${createdData.department}'`);
         console.log(`Course:      '${createdData.course}'`);
         console.log(`YearOfStudy: '${createdData.yearOfStudy}'`);
         console.log(`Semester:    '${createdData.semester}'`);
-        console.log(`IsVerified:  true`); // Hardcoded in query
+        console.log(`IsVerified:  true`);
         console.log('------------------------------------');
         console.log('>>> DEBUG: Compare these values EXACTLY (case, whitespace) with data in your Firestore `users` collection for students who *should* match. <<<');
 
         // Build the Firestore query to find matching students
         const studentsQuery = db.collection(USERS_COLLECTION)
             .where('role', '==', 'student')
-            .where('school', '==', createdData.school) // Ensure exact match
-            .where('department', '==', createdData.department) // Ensure exact match
-            .where('course', '==', createdData.course) // Ensure exact match
-            .where('yearOfStudy', '==', createdData.yearOfStudy) // Ensure exact match
-            .where('semester', '==', createdData.semester) // Ensure exact match
-            .where('isVerified', '==', true); // Ensure student is verified
+            .where('school', '==', createdData.school)
+            .where('department', '==', createdData.department)
+            .where('course', '==', createdData.course)
+            .where('yearOfStudy', '==', createdData.yearOfStudy)
+            .where('semester', '==', createdData.semester)
+            .where('isVerified', '==', true);
 
         try {
             const studentsSnapshot = await studentsQuery.get();
@@ -241,25 +241,24 @@ router.post('/', checkAuth, async (req, res) => {
                 studentsSnapshot.forEach(studentDoc => {
                     const studentData = studentDoc.data();
                     const studentId = studentDoc.id;
-                    const studentPhoneNumber = studentData.phoneNumber; // **VERIFY THIS FIELD NAME** in your Firestore 'users' collection
+                    const studentPhoneNumber = studentData.phoneNumber; // **VERIFY THIS FIELD NAME**
 
-                    console.log(`Processing student ${studentId}: Phone='${studentPhoneNumber}', Verified='${studentData.isVerified}', Role='${studentData.role}'`); // Log details for each potential recipient
+                    console.log(`Processing student ${studentId}: Phone='${studentPhoneNumber}', Verified='${studentData.isVerified}', Role='${studentData.role}'`);
 
-                    // Validate phone number exists and looks like a valid E.164 format
+                    // Validate phone number
                     if (studentPhoneNumber && typeof studentPhoneNumber === 'string' && studentPhoneNumber.startsWith('+') && studentPhoneNumber.length > 10) {
                         console.log(`Queueing SMS to student ${studentId} at ${studentPhoneNumber}`);
                         smsPromises.push(
                             twilioClient.messages.create({
                                 body: smsMessageBody,
                                 messagingServiceSid: messagingServiceSid,
-                                to: studentPhoneNumber // E.164 format required
+                                to: studentPhoneNumber
                             })
                             .then(message => {
                                 console.log(`SMS sent successfully to ${studentPhoneNumber} (Student ID: ${studentId}), SID: ${message.sid}`);
                                 return { status: 'fulfilled', sid: message.sid, phone: studentPhoneNumber };
                             })
                             .catch(error => {
-                                // Log detailed Twilio errors
                                 console.error(`Failed to send SMS to ${studentPhoneNumber} (Student ID: ${studentId}): ${error.message}`);
                                 console.error(`Twilio Error Code: ${error.code || 'N/A'}, More Info: ${error.moreInfo || 'N/A'}`);
                                 return { status: 'rejected', error: error.message, phone: studentPhoneNumber, code: error.code };
@@ -270,16 +269,15 @@ router.post('/', checkAuth, async (req, res) => {
                     }
                 });
 
-                // Send all SMS messages concurrently and wait for results
+                // Send all SMS messages
                 if (smsPromises.length > 0) {
                     console.log(`Attempting to send ${smsPromises.length} SMS messages...`);
-                    const results = await Promise.allSettled(smsPromises); // Use allSettled to wait for all, even failures
+                    const results = await Promise.allSettled(smsPromises);
 
                     const successfulSends = results.filter(r => r.status === 'fulfilled').length;
                     const failedSends = results.filter(r => r.status === 'rejected').length;
                     console.log(`SMS sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
 
-                    // Log detailed failure reasons if any occurred
                     results.filter(r => r.status === 'rejected').forEach(failure => {
                          console.warn(` -> Failed SMS Detail: Phone: ${failure.reason.phone}, Code: ${failure.reason.code || 'N/A'}, Error: ${failure.reason.error}`);
                     });
@@ -289,7 +287,7 @@ router.post('/', checkAuth, async (req, res) => {
             }
         } catch (queryError) {
             console.error(`Error querying students or sending SMS for lecture ${createdLectureId}:`, queryError);
-            // Don't block the main response for SMS errors, but log them thoroughly.
+            // Don't block the main response for SMS errors
         }
 
     } else if (!twilioClient) {
@@ -301,43 +299,39 @@ router.post('/', checkAuth, async (req, res) => {
 
 
     // --- *** 3. Return the success response to the client *** ---
-    // Ensure createdData exists before trying to format its fields
     const responseData = createdData ? {
         id: createdDoc.id,
         ...createdData,
-        // Format timestamps back to ISO strings for client consistency
         lectureDate: formatTimestampForClient(createdData.lectureDate),
         startTime: formatTimestampForClient(createdData.startTime),
         endTime: formatTimestampForClient(createdData.endTime),
         createdAt: formatTimestampForClient(createdData.createdAt),
-     } : { id: createdLectureId, message: "Lecture created, but failed to fetch full data for response." }; // Fallback response
+     } : { id: createdLectureId, message: "Lecture created, but failed to fetch full data for response." };
 
     res.status(201).json(responseData);
 
   } catch (error) {
     // --- Global Error Handling for the Route ---
     console.error(`Error processing POST /lectures request (Lecture ID if created: ${createdLectureId || 'N/A'}):`, error);
-    console.error('Error Stack:', error.stack); // Log stack trace for detailed debugging
+    console.error('Error Stack:', error.stack);
 
     let errorMessage = 'Internal Server Error: Failed to create lecture or process notifications';
     let statusCode = 500;
 
-    // Customize error message based on error type if possible
     if (error.code && error.message && error.message.includes('Twilio')) {
         errorMessage = 'Internal Server Error: Failed during SMS notification process.';
-    } else if (error.code === 'permission-denied' || error.status === 403) { // Firestore security rule or auth error
+    } else if (error.code === 'permission-denied' || error.status === 403) {
         errorMessage = 'Forbidden: You do not have permission to perform this action.';
         statusCode = 403;
-    } else if (error.status === 400) { // Validation errors passed up
+    } else if (error.status === 400) {
         errorMessage = error.message || 'Bad Request: Invalid input data.';
         statusCode = 400;
-    } else if (error.code) { // Other potential Firestore/gRPC errors
+    } else if (error.code) {
         errorMessage = `Internal Server Error: Database operation failed (Code: ${error.code})`;
     }
 
     res.status(statusCode).json({
         error: errorMessage,
-        // Provide detailed error only in development for security
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
@@ -347,9 +341,8 @@ router.post('/', checkAuth, async (req, res) => {
 router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
     try {
         const requestedLecturerId = req.params.lecturerId;
-        const authUserId = req.userData.userId; // ID of the user making the request
+        const authUserId = req.userData.userId;
 
-        // Security: Ensure the authenticated user is requesting their own lectures
         if (requestedLecturerId !== authUserId) {
             console.log(`Forbidden attempt: User ${authUserId} tried to access lectures for ${requestedLecturerId}`);
             return res.status(403).json({ error: 'Forbidden: You can only access your own lectures.' });
@@ -359,12 +352,12 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
         const lecturesRef = db.collection(LECTURES_COLLECTION);
         const snapshot = await lecturesRef
             .where('lecturerId', '==', requestedLecturerId)
-            .orderBy('startTime', 'desc') // Show most recent first
+            .orderBy('startTime', 'desc')
             .get();
 
         if (snapshot.empty) {
             console.log(`No lectures found for lecturer ${requestedLecturerId}`);
-            return res.json([]); // Return empty array, not an error
+            return res.json([]);
         }
 
         const lectures = snapshot.docs.map(doc => {
@@ -372,7 +365,6 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
             return {
                 id: doc.id,
                 ...data,
-                // Format timestamps for client
                 lectureDate: formatTimestampForClient(data.lectureDate),
                 startTime: formatTimestampForClient(data.startTime),
                 endTime: formatTimestampForClient(data.endTime),
@@ -396,7 +388,6 @@ router.get('/student', checkAuth, async (req, res) => {
   try {
     const studentUserId = req.userData.userId;
 
-    // Fetch student's profile data
     const studentDoc = await db.collection(USERS_COLLECTION).doc(studentUserId).get();
     if (!studentDoc.exists) {
         console.error(`Student profile not found for authenticated user ID: ${studentUserId}`);
@@ -404,22 +395,17 @@ router.get('/student', checkAuth, async (req, res) => {
     }
     const studentData = studentDoc.data();
 
-    // Extract filter criteria FROM STUDENT PROFILE
     const { school, department, course, yearOfStudy, semester, role, isVerified } = studentData;
 
-    // Validate student role and required profile fields for filtering
     if (role !== 'student') {
          console.error(`User ${studentUserId} is not a student (role: ${role}). Cannot fetch student lectures.`);
          return res.status(403).json({ error: 'Forbidden: Only students can access this lecture list.' });
     }
      if (!isVerified) {
          console.warn(`Student ${studentUserId} is not verified. They may not see all lectures.`);
-         // Decide if unverified students should see lectures at all, or just proceed
-         // return res.status(403).json({ error: 'Forbidden: Your account is not verified.' });
     }
     if (!school || !department || !course || !yearOfStudy || !semester) {
         console.error(`Validation Error: Missing required profile fields for student ${studentUserId} to filter lectures.`);
-        // Consider making this a 404 or a specific error code the client can handle to prompt profile completion
         return res.status(400).json({ error: 'Your profile is missing required details (school, department, course, year, semester) to find lectures.' });
     }
 
@@ -428,27 +414,23 @@ router.get('/student', checkAuth, async (req, res) => {
     const lecturesRef = db.collection(LECTURES_COLLECTION);
     let query = lecturesRef;
 
-    // Apply filters using student's profile data
     query = query.where('school', '==', school);
     query = query.where('department', '==', department);
     query = query.where('course', '==', course);
     query = query.where('yearOfStudy', '==', yearOfStudy);
     query = query.where('semester', '==', semester);
 
-    // Filter for lectures starting today or later (using startTime)
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today in server's timezone
+    today.setHours(0, 0, 0, 0);
     query = query.where('startTime', '>=', today);
 
-    // Order results by start time (earliest first)
-    // IMPORTANT: This composite query requires a Firestore index! Check logs for link if needed.
     query = query.orderBy('startTime', 'asc');
 
     const snapshot = await query.get();
 
     if (snapshot.empty) {
         console.log(`No upcoming student lectures found for student ${studentUserId} with filters: ${JSON.stringify({ school, department, course, yearOfStudy, semester })}`);
-        return res.json([]); // Return empty array
+        return res.json([]);
     }
 
     const lectures = snapshot.docs.map(doc => {
@@ -456,7 +438,6 @@ router.get('/student', checkAuth, async (req, res) => {
         return {
             id: doc.id,
             ...data,
-            // Format timestamps for client
             lectureDate: formatTimestampForClient(data.lectureDate),
             startTime: formatTimestampForClient(data.startTime),
             endTime: formatTimestampForClient(data.endTime),
@@ -469,7 +450,6 @@ router.get('/student', checkAuth, async (req, res) => {
   } catch (error) {
     console.error(`Error getting student lectures for user ${req.userData?.userId}:`, error);
 
-    // Check specifically for Firestore index errors
     if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
         console.error("Firestore Index Missing: The query requires an index. Check the error details for a link to create it in the Firebase console.");
         return res.status(500).json({
@@ -528,7 +508,6 @@ router.get('/', checkAuth, async (req, res) => {
 });
 
 // --- Get lecture by ID ---
-// Apply checkAuth middleware - assumes any logged-in user can fetch by ID if they know it
 router.get('/:lectureId', checkAuth, async (req, res) => {
   try {
     const lectureId = req.params.lectureId;
@@ -560,23 +539,79 @@ router.get('/:lectureId', checkAuth, async (req, res) => {
 });
 
 
-// --- Add PUT (Update) and DELETE endpoints if needed ---
-// Example Stubs: Implement full logic including authorization
-// router.put('/:lectureId', checkAuth, async (req, res) => {
-//    // 1. Authorize: Check if req.userData.userId is the original lecturerId or an admin
-//    // 2. Validate req.body
-//    // 3. Parse dates
-//    // 4. Prepare update data (use FieldValue.serverTimestamp() for updatedAt if needed)
-//    // 5. Use db.collection(LECTURES_COLLECTION).doc(lectureId).update(updateData);
-//    // 6. Consider if SMS update notifications are needed
-//    // 7. Return updated lecture or success message
-// });
-// router.delete('/:lectureId', checkAuth, async (req, res) => {
-//    // 1. Authorize: Check if req.userData.userId is the original lecturerId or an admin
-//    // 2. Use db.collection(LECTURES_COLLECTION).doc(lectureId).delete();
-//    // 3. Consider if SMS cancellation notifications are needed
-//    // 4. Return success message
-// });
+// --- Add PUT (Update) endpoint if needed ---
+// router.put('/:lectureId', checkAuth, async (req, res) => { ... });
+
+// --- *** ADD DELETE LECTURE ENDPOINT *** ---
+router.delete('/:lectureId', checkAuth, async (req, res) => {
+    const lectureId = req.params.lectureId;
+    const authenticatedUserId = req.userData.userId; // Get user ID from auth middleware
+
+    if (!lectureId) {
+        console.log('Delete request failed: Missing lectureId parameter.');
+        return res.status(400).json({ message: 'Lecture ID is required.' });
+    }
+
+    console.log(`Attempting to delete lecture ${lectureId} by user ${authenticatedUserId}`);
+
+    try {
+        const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
+        const lectureDoc = await lectureRef.get();
+
+        if (!lectureDoc.exists) {
+            console.log(`Delete failed: Lecture ${lectureId} not found.`);
+            return res.status(404).json({ message: 'Lecture not found.' });
+        }
+
+        const lectureData = lectureDoc.data();
+
+        // --- AUTHORIZATION CHECK ---
+        // Ensure the authenticated user is the one who created the lecture
+        // TODO: Add admin role check if admins should also be allowed to delete
+        if (lectureData.lecturerId !== authenticatedUserId) {
+            console.warn(`Unauthorized delete attempt: User ${authenticatedUserId} tried to delete lecture ${lectureId} owned by ${lectureData.lecturerId}`);
+            return res.status(403).json({ message: 'Forbidden: You do not have permission to delete this lecture.' });
+        }
+        // --- END AUTHORIZATION CHECK ---
+
+        // --- Deletion Logic (using Batch Write for atomicity) ---
+        const batch = db.batch(); // Initialize batch write
+
+        // 1. Delete the lecture document itself
+        batch.delete(lectureRef);
+        console.log(`Scheduled deletion for lecture document: ${lectureId}`);
+
+        // 2. Find and schedule deletion for associated attendance records
+        const attendanceQuery = db.collection(ATTENDANCE_COLLECTION).where('lectureId', '==', lectureId);
+        const attendanceSnapshot = await attendanceQuery.get();
+
+        if (!attendanceSnapshot.empty) {
+            console.log(`Found ${attendanceSnapshot.size} attendance records associated with lecture ${lectureId}. Scheduling for deletion.`);
+            attendanceSnapshot.docs.forEach(doc => {
+                batch.delete(doc.ref); // Add each attendance record deletion to the batch
+            });
+        } else {
+            console.log(`No attendance records found for lecture ${lectureId}.`);
+        }
+
+        // 3. Commit the batch write
+        await batch.commit();
+        // --- End Deletion Logic ---
+
+        console.log(`Lecture ${lectureId} and associated attendance records deleted successfully by user ${authenticatedUserId}.`);
+        // Send 204 No Content on successful deletion
+        return res.status(204).send();
+
+    } catch (error) {
+        console.error(`Error deleting lecture ${lectureId}:`, error);
+        console.error('Error Stack:', error.stack); // Log stack trace
+        return res.status(500).json({
+            message: 'Internal server error while deleting lecture.',
+            details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+        });
+    }
+});
+// --- *** END DELETE LECTURE ENDPOINT *** ---
 
 
 module.exports = router; // Export the router
