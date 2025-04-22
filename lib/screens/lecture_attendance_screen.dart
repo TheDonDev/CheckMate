@@ -1,6 +1,6 @@
 // lib/screens/lecture_attendance_screen.dart
 import 'dart:io'; // For File operations
-import 'dart:typed_data'; // For Uint8List
+// For Uint8List
 import 'dart:ui' as ui; // For Image rendering
 
 import 'package:checkmate/models/attendance_record.dart';
