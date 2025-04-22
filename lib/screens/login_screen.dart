@@ -31,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- Support Contact Details ---
   // TODO: Replace with actual support email address
-  final String _supportEmail = 'support@checkmateapp.example.com';
+  final String _supportEmail = 'donaldmwanga33@gmail.com';
   final String _supportSubject = 'Checkmate App Support Request';
   // --- End Support Contact Details ---
 

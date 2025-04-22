@@ -43,7 +43,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _selectedYearOfStudy;
   String? _selectedSemester;
   bool _isLoading = false;
-  bool _isStudent = false;
+  bool _isStudent = false; // Determined by email domain
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -55,6 +55,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void initState() {
     super.initState();
+    // Listen to email changes to determine if user is a student
     _emailController.addListener(_checkEmailDomain);
   }
 
@@ -73,16 +74,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // Check email domain to show/hide student-specific fields
   void _checkEmailDomain() {
     final email = _emailController.text.trim().toLowerCase();
+    // Only emails ending with @student.au.ac.ke are considered student emails
     final bool isStudentEmail = email.endsWith('@student.au.ac.ke');
+
+    // Update state only if the student status changes
     // Use mounted check before calling setState
     if (mounted && _isStudent != isStudentEmail) {
       setState(() {
         _isStudent = isStudentEmail;
+        // If the user is NOT a student, clear student-specific fields
         if (!isStudentEmail) {
           _registrationNumberController.clear();
           _selectedYearOfStudy = null;
           _selectedSemester = null;
         }
+        // Trigger re-validation if needed, especially for student fields
+        _formKey.currentState?.validate();
       });
     }
   }
@@ -101,7 +108,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // Registration Action - Updated to include all new fields
+  // Registration Action - Handles both students and lecturers
   Future<void> _handleRegister() async {
     // Validate the form first
     if (!_formKey.currentState!.validate()) {
@@ -109,34 +116,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return; // Don't proceed if form is invalid
     }
 
-    // Check mount status before proceeding
+    // Check mount status before proceeding with async operation
     if (!mounted) return;
     setState(() { _isLoading = true; });
 
+    // Conditionally get student-specific data
     final registrationNumber = _isStudent ? _registrationNumberController.text.trim() : null;
     final yearOfStudy = _isStudent ? _selectedYearOfStudy : null;
     final semester = _isStudent ? _selectedSemester : null;
 
-    // Get the validated phone number (already validated by the form)
-    final phoneNumber = _phoneNumberController.text.trim();
+    // Get common data
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final phoneNumber = _phoneNumberController.text.trim(); // Already validated
 
     try {
-      // Call AuthService signUp with all fields
+      // Call AuthService signUp with all relevant fields
       await _authService.signUp(
-        name: _nameController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-        phoneNumber: phoneNumber, // Pass the validated +254... number
-        school: _selectedSchool,
-        department: _selectedDepartment,
-        course: _selectedCourse,
+        name: name,
+        email: email,
+        password: password,
+        phoneNumber: phoneNumber,
+        school: _selectedSchool, // Required for all users
+        department: _selectedDepartment, // Required for all users
+        course: _selectedCourse, // Required for all users
+        // Pass student-specific data only if the user is a student
         registrationNumber: registrationNumber,
         yearOfStudy: yearOfStudy,
         semester: semester,
       );
-      // Check mount status again after async operation
+
+      // Check mount status again after async operation before showing dialog
       if (!mounted) return;
       _showSuccessDialog(); // Show success message
+
     } on AuthException catch (e) {
       print("AuthException during registration: ${e.message}");
       if (!mounted) return;
@@ -214,57 +228,89 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: _nameController,
                   decoration: inputDecoration(
                     'Full Name',
-                    hint: 'E.g., JOHN DOE or DR. JANE DOE',
+                    // Updated hint text to be more inclusive
+                    hint: 'E.g., JOHN DOE or PROF. JANE D. SMITH ',
                     prefixIcon: Icon(Icons.person_outline, color: brandColor.withOpacity(0.7)),
                   ),
                   inputFormatters: [
                     UpperCaseTextFormatter(),
+                    // Allow uppercase letters, spaces, and periods
                     FilteringTextInputFormatter.allow(RegExp(r'[A-Z .]')),
                   ],
                   textCapitalization: TextCapitalization.characters,
                   validator: (value) {
-                    // --- Name Validation Logic ---
+                    // --- Name Validation Logic (Handles various formats) ---
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your full name';
                     }
-                    final trimmedValue = _nameController.text.trim();
+                    final trimmedValue = value.trim();
+
+                    // 1. Basic Character Check
                     if (!RegExp(r'^[A-Z .]+$').hasMatch(trimmedValue)) {
-                       return 'Name can only contain uppercase letters, spaces, and periods for designation (e.g., DR.)';
+                       return 'Name can only contain uppercase letters, spaces, and periods.';
                     }
+
+                    // 2. Check for invalid patterns
                     if (trimmedValue.contains('  ')) {
-                      return 'Use single spaces only between name parts';
+                      return 'Use single spaces only between name parts.';
                     }
+                    if (trimmedValue.contains('..')) {
+                      return 'Consecutive periods are not allowed.';
+                    }
+                    if (trimmedValue.startsWith('.') || trimmedValue.endsWith('.') || trimmedValue.startsWith(' ') || trimmedValue.endsWith(' ')) {
+                      return 'Name cannot start or end with a space or period.';
+                    }
+
+                    // 3. Split into parts
                     final parts = trimmedValue.split(' ').where((part) => part.isNotEmpty).toList();
                     if (parts.isEmpty) {
                         return 'Please enter your full name';
                     }
-                    bool hasDesignation = parts[0].endsWith('.');
-                    bool periodError = false;
-                    String? partError = null;
-                    for (int i = 0; i < parts.length; i++) {
+
+                    // 4. Validate parts (Designation, Names, Initials)
+                    bool hasDesignation = parts[0].endsWith('.') && parts[0].length > 1;
+                    int namePartStartIndex = 0;
+                    String? partError;
+
+                    // Validate designation if present
+                    if (hasDesignation) {
+                        String designationText = parts[0].substring(0, parts[0].length - 1);
+                        if (!RegExp(r'^[A-Z]+$').hasMatch(designationText)) {
+                            return 'Designation part must contain only letters before the period (e.g., DR., PROF.)';
+                        }
+                        namePartStartIndex = 1;
+                    }
+
+                    // Validate the remaining parts
+                    int nameOrInitialCount = 0;
+                    for (int i = namePartStartIndex; i < parts.length; i++) {
                         String currentPart = parts[i];
-                        bool isDesignationPart = (i == 0 && hasDesignation);
-                        if (currentPart.contains('.')) {
-                            if (!isDesignationPart || !currentPart.endsWith('.') || currentPart.length == 1) {
-                                periodError = true; break;
+                        bool isFullNamePart = RegExp(r'^[A-Z]+$').hasMatch(currentPart);
+                        bool isInitialPart = RegExp(r'^[A-Z]\.$').hasMatch(currentPart);
+
+                        if (isFullNamePart || isInitialPart) {
+                            nameOrInitialCount++;
+                            if (isFullNamePart && currentPart.contains('.')) {
+                                partError = 'Periods are only allowed after single initials (e.g., K.) or designations (e.g., DR.).';
+                                break;
                             }
-                            String designationText = currentPart.substring(0, currentPart.length - 1);
-                            if (!RegExp(r'^[A-Z]+$').hasMatch(designationText)) {
-                                partError = 'Designation part must contain only letters before the period (e.g., DR.)'; break;
-                            }
-                        } else if (!isDesignationPart) {
-                             if (!RegExp(r'^[A-Z]+$').hasMatch(currentPart)) {
-                                 partError = 'Name parts (First, Second, Last) must contain only uppercase letters (A-Z)'; break;
-                             }
+                        } else {
+                            partError = 'Name parts must be full names (e.g., JOHN) or initials ending with a period (e.g., K.). Invalid part: "$currentPart"';
+                            break;
                         }
                     }
-                    if (periodError) { return 'Period (.) only allowed at the end of a designation (e.g., DR.)'; }
-                    if (partError != null) { return partError; }
-                    if (hasDesignation) {
-                        if (parts.length < 3) { return 'Enter Designation, First Name, and Second Name (e.g., DR. JOHN DOE)'; }
-                    } else {
-                        if (parts.length < 2) { return 'Enter at least First and Second name (e.g., JOHN DOE)'; }
+
+                    if (partError != null) {
+                        return partError;
                     }
+
+                    // 5. Check minimum number of name/initial parts
+                    if (nameOrInitialCount < 2) {
+                        return hasDesignation
+                            ? 'Enter at least two name parts/initials after the designation (e.g., DR. J. DOE)'
+                            : 'Enter at least a First and Last name or initial (e.g., J. DOE or JOHN DOE)';
+                    }
+
                     return null; // Name is valid
                     // --- End Name Validation ---
                   },
@@ -277,7 +323,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: _emailController,
                   decoration: inputDecoration(
                     'Email Address',
-                    hint: 'Enter university email (@student.au.ac.ke or @au.ac.ke)',
+                    // Updated hint text to include all allowed domains
+                    hint: 'Use @student.au.ac.ke, @au.ac.ke, or @kibu.ac.ke',
                     prefixIcon: Icon(Icons.email_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   keyboardType: TextInputType.emailAddress,
@@ -286,13 +333,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       return 'Please enter your email';
                     }
                     final email = value.trim().toLowerCase();
-                    if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(email)) {
+                    // Basic email format check
+                    if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").hasMatch(email)) {
                       return 'Please enter a valid email address';
                     }
-                    if (!email.endsWith('au.ac.ke')) {
-                      return 'Please use your university email (@student.au.ac.ke or @au.ac.ke)';
+                    // *** UPDATED DOMAIN VALIDATION ***
+                    // Check if the email ends with one of the allowed university domains
+                    final allowedDomains = ['@student.au.ac.ke', '@au.ac.ke', '@kibu.ac.ke'];
+                    bool isValidDomain = allowedDomains.any((domain) => email.endsWith(domain));
+
+                    if (!isValidDomain) {
+                      return 'Use a valid university email (@student.au.ac.ke, @au.ac.ke, or @kibu.ac.ke)';
                     }
-                    return null;
+                    return null; // Email is valid
                   },
                   textInputAction: TextInputAction.next,
                 ),
@@ -309,13 +362,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   keyboardType: TextInputType.phone,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[+0-9]')),
-                    LengthLimitingTextInputFormatter(13),
+                    LengthLimitingTextInputFormatter(13), // +254 plus 9 digits
                   ],
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your phone number';
                     }
                     final trimmedValue = value.trim();
+                    // Regex for Kenyan phone numbers starting with +254 followed by 7 or 1 and 8 digits
                     final RegExp phoneRegExp = RegExp(r'^\+254[17]\d{8}$');
                     if (!phoneRegExp.hasMatch(trimmedValue)) {
                       return 'Format must be +2547xxxxxxxx or +2541xxxxxxxx';
@@ -327,6 +381,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 18),
 
                 // --- Conditionally Display Student-Specific Fields ---
+                // These fields are only shown if the email domain is @student.au.ac.ke
                 if (_isStudent) ...[
                   // Registration Number Field
                   TextFormField(
@@ -335,16 +390,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       'Registration Number',
                       prefixIcon: Icon(Icons.badge_outlined, color: brandColor.withOpacity(0.7)),
                     ),
+                    // Validation only applies if the user is a student
                     validator: (value) {
                       if (_isStudent && (value == null || value.trim().isEmpty)) {
                         return 'Please enter your registration number';
                       }
+                      // Add more specific registration number format validation if needed
                       return null;
                     },
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [
                       UpperCaseTextFormatter(),
-                      FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9/-]')),
+                      FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9/-]')), // Allow letters, numbers, hyphen, slash
                     ],
                     textInputAction: TextInputAction.next,
                   ),
@@ -361,11 +418,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       return DropdownMenuItem<String>(value: year, child: Text(year));
                     }).toList(),
                     onChanged: (String? newValue) {
-                      // Use mounted check before calling setState
                       if (mounted) {
                         setState(() { _selectedYearOfStudy = newValue; });
                       }
                     },
+                    // Validation only applies if the user is a student
                     validator: (value) => _isStudent && value == null ? 'Please select year of study' : null,
                     isExpanded: true,
                   ),
@@ -382,11 +439,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       return DropdownMenuItem<String>(value: semester, child: Text(semester));
                     }).toList(),
                     onChanged: (String? newValue) {
-                      // Use mounted check before calling setState
                       if (mounted) {
                         setState(() { _selectedSemester = newValue; });
                       }
                     },
+                    // Validation only applies if the user is a student
                     validator: (value) => _isStudent && value == null ? 'Please select current semester' : null,
                     isExpanded: true,
                   ),
@@ -417,6 +474,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     if (value.length < 8) {
                       return 'Password must be at least 8 characters';
                     }
+                    // Consider adding more complexity requirements (e.g., numbers, symbols)
                     return null;
                   },
                   textInputAction: TextInputAction.next,
@@ -448,11 +506,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     }
                     return null;
                   },
+                  // Adjust textInputAction based on whether student fields are visible
                   textInputAction: _isStudent ? TextInputAction.next : TextInputAction.done,
+                  // If not a student, hitting done on keyboard can trigger registration
+                  onFieldSubmitted: _isStudent ? null : (_) => _handleRegister(),
                 ),
                 const SizedBox(height: 18),
 
-                // --- School/Dept/Course Dropdowns (Visible for everyone) ---
+                // --- School/Dept/Course Dropdowns (Visible and Required for everyone) ---
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
                     'School',
@@ -463,14 +524,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     return DropdownMenuItem<String>(value: school, child: Text(school, overflow: TextOverflow.ellipsis));
                   }).toList(),
                   onChanged: (String? newValue) {
-                    // Use mounted check before calling setState
                     if (mounted) {
                       setState(() {
                         _selectedSchool = newValue;
-                        _selectedDepartment = null; // Reset dependent
+                        _selectedDepartment = null; // Reset dependent dropdowns
                         _selectedCourse = null;
-                        // Note: _updateDependentDropdowns is implicitly handled by build
                       });
+                      // Trigger re-validation if needed
+                      _formKey.currentState?.validate();
                     }
                   },
                   validator: (value) => value == null ? 'Please select your school' : null,
@@ -487,21 +548,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   value: _selectedDepartment,
                   disabledHint: _selectedSchool == null ? const Text('Select school first') : null,
-                  // Rebuild items based on current _selectedSchool
+                  // Enable/disable and populate based on school selection
                   items: (_selectedSchool != null && departmentsMap.containsKey(_selectedSchool))
                       ? departmentsMap[_selectedSchool]!.map((String department) {
                           return DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis));
                         }).toList()
-                      : [],
+                      : [], // Empty list if no school selected or school not in map
                   onChanged: (_selectedSchool == null || !departmentsMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
-                    // Use mounted check before calling setState
                     if (mounted) {
                       setState(() {
                         _selectedDepartment = newValue;
-                        _selectedCourse = null; // Reset course
+                        _selectedCourse = null; // Reset course when department changes
                       });
+                      // Trigger re-validation if needed
+                      _formKey.currentState?.validate();
                     }
                   },
+                  // Validation applies only if a school is selected
                   validator: (value) => _selectedSchool != null && value == null ? 'Please select your department' : null,
                   isExpanded: true,
                 ),
@@ -510,26 +573,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 // Course Dropdown
                 DropdownButtonFormField<String>(
                   decoration: inputDecoration(
-                    'Course',
+                    'Course', // Label remains 'Course' for simplicity, applicable to lecturer's primary course area too
                      hint: _selectedDepartment == null ? 'Select department first' : 'Select your course',
                      prefixIcon: Icon(Icons.book_outlined, color: brandColor.withOpacity(0.7)),
                   ),
                   value: _selectedCourse,
                   disabledHint: _selectedDepartment == null ? const Text('Select department first') : null,
-                  // Rebuild items based on current _selectedSchool
-                  items: (_selectedSchool != null && coursesMap.containsKey(_selectedSchool)) // Use coursesMap linked to SCHOOL
+                  // Enable/disable and populate based on school selection (courses are mapped by school)
+                  items: (_selectedSchool != null && coursesMap.containsKey(_selectedSchool))
                       ? coursesMap[_selectedSchool]!.map((String course) {
                           return DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis));
                         }).toList()
-                      : [],
+                      : [], // Empty list if no school selected or school not in map
                   onChanged: (_selectedSchool == null || _selectedDepartment == null || !coursesMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
-                    // Use mounted check before calling setState
                     if (mounted) {
                       setState(() {
                         _selectedCourse = newValue;
                       });
+                      // Trigger re-validation if needed
+                      _formKey.currentState?.validate();
                     }
                   },
+                  // Validation applies only if a department is selected
                   validator: (value) => _selectedDepartment != null && value == null ? 'Please select your course' : null,
                   isExpanded: true,
                 ),
@@ -552,14 +617,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             letterSpacing: 0.5,
                           ),
                         ),
-                        onPressed: _handleRegister,
+                        onPressed: _handleRegister, // Calls the registration logic
                         child: const Text('Register'),
                       ),
                 const SizedBox(height: 15),
 
                 // Login Link
                 TextButton(
-                  onPressed: _isLoading ? null : () { // Disable while loading
+                  onPressed: _isLoading ? null : () { // Disable button while loading
                     // Navigate to LoginScreen, replacing the current route
                     Navigator.pushReplacement(
                       context,
@@ -569,7 +634,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: TextButton.styleFrom(foregroundColor: brandColor),
                   child: const Text("Already have an account? Login here"),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 20), // Bottom padding
               ],
             ),
           ),
@@ -584,7 +649,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false, // Prevent dismissing easily
+      barrierDismissible: false, // User must tap button to close
       builder: (BuildContext context) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -600,18 +665,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
             TextButton(
               style: TextButton.styleFrom(foregroundColor: brandColor),
               child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
-              // --- CORRECTED NAVIGATION LOGIC ---
               onPressed: () {
                 // 1. Close the success dialog
-                Navigator.of(context).pop();
-                // 2. Always navigate to LoginScreen, replacing the current route
+                Navigator.of(context).pop(); // Use the dialog's context to pop itself
+                // 2. Navigate to LoginScreen, replacing the current route
                 //    Use pushReplacement to prevent user from going back to RegisterScreen
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (context) => const LoginScreen()),
-                );
+                if (mounted) { // Check mount status again before navigation
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (context) => const LoginScreen()),
+                  );
+                }
               },
-              // --- END CORRECTION ---
             ),
           ],
         );

@@ -3,7 +3,7 @@
 const express = require('express');
 const { db, admin } = require('../firebase'); // Ensure admin is required for FieldValue.serverTimestamp()
 const router = express.Router();
-const checkAuth = require('../middleware/checkAuth'); // Ensure this path is correct
+const checkAuth = require('../middleware/checkAuth'); 
 
 // --- Constants for Collection Names (Standardized to lowercase) ---
 const ATTENDANCE_COLLECTION = 'attendance'; // Standardized
