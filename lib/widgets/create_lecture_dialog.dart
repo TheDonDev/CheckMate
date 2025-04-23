@@ -39,6 +39,9 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   final _lecturerPhoneController = TextEditingController();
   final _unitNameController = TextEditingController();
   final _unitCodeController = TextEditingController();
+  // --- ADDED: Controller for online link ---
+  final _onlineLinkController = TextEditingController();
+  // --- END ADDED ---
 
   // State variables for dropdowns and pickers
   String? _selectedYear;
@@ -55,8 +58,6 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     super.initState();
     // Pre-fill lecturer's phone if available
     _lecturerPhoneController.text = widget.currentUser.phoneNumber ?? '';
-    // Optionally set initial date to today
-    // _selectedDate = DateTime.now();
   }
 
   @override
@@ -65,6 +66,9 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     _lecturerPhoneController.dispose();
     _unitNameController.dispose();
     _unitCodeController.dispose();
+    // --- ADDED: Dispose online link controller ---
+    _onlineLinkController.dispose();
+    // --- END ADDED ---
     super.dispose();
   }
 
@@ -106,17 +110,13 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   // Method to show the date picker
   Future<void> _pickDate() async {
     final DateTime now = DateTime.now();
-    // --- MODIFICATION: Set firstDate to today (ignoring time) ---
     final DateTime today = DateTime(now.year, now.month, now.day);
-    // --- END MODIFICATION ---
 
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? today, // Default initial date to today
-      // --- MODIFICATION: Use 'today' as the first selectable date ---
+      initialDate: _selectedDate ?? today,
       firstDate: today,
-      // --- END MODIFICATION ---
-      lastDate: today.add(const Duration(days: 365)), // Allow up to one year in the future from today
+      lastDate: today.add(const Duration(days: 365)),
       helpText: 'Select Lecture Date',
       builder: (context, child) {
         return Theme(
@@ -167,12 +167,11 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       setState(() {
         if (isStartTime) {
           _selectedStartTime = picked;
-          // Reset end time if it becomes invalid
           if (_selectedEndTime != null) {
              final startMinutes = _selectedStartTime!.hour * 60 + _selectedStartTime!.minute;
              final endMinutes = _selectedEndTime!.hour * 60 + _selectedEndTime!.minute;
              if(endMinutes <= startMinutes) {
-                _selectedEndTime = null; // Or suggest a time slightly after start
+                _selectedEndTime = null;
              }
           }
         } else {
@@ -184,84 +183,88 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
   // Method to handle form submission
   Future<void> _submitForm() async {
-    if (_formKey.currentState!.validate()) {
-      if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
-         _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
-      }
-
-      // Combine Date and Time into DateTime objects
-      final DateTime startDateTime = DateTime(
-        _selectedDate!.year,
-        _selectedDate!.month,
-        _selectedDate!.day,
-        _selectedStartTime!.hour,
-        _selectedStartTime!.minute,
-      );
-      final DateTime endDateTime = DateTime(
-        _selectedDate!.year,
-        _selectedDate!.month,
-        _selectedDate!.day,
-        _selectedEndTime!.hour,
-        _selectedEndTime!.minute,
-      );
-
-      // Validate end time is after start time
-      if (!endDateTime.isAfter(startDateTime)) {
-         _showValidationError('End time must be after start time.'); return;
-      }
-
-      // --- ADDED: Validate selected date is not in the past (redundant due to picker, but good practice) ---
-      final DateTime today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
-      if (_selectedDate!.isBefore(today)) {
-          _showValidationError('Cannot create a lecture for a past date.'); return;
-      }
-      // --- END ADDED VALIDATION ---
-
-
-      setState(() => _isLoading = true);
-
-      // Pass combined DateTime objects to Lecture constructor
-      final newLecture = Lecture(
-        id: '',
-        lecturerId: widget.currentUser.id,
-        lecturerName: widget.currentUser.name,
-        lecturerPhone: _lecturerPhoneController.text.trim().isEmpty ? null : _lecturerPhoneController.text.trim(),
-        school: widget.currentUser.school ?? 'N/A',
-        department: widget.currentUser.department ?? 'N/A',
-        course: widget.currentUser.course ?? 'N/A',
-        yearOfStudy: _selectedYear!,
-        semester: _selectedSemester!,
-        unitName: _unitNameController.text.trim(),
-        unitCode: _unitCodeController.text.trim(),
-        lectureDate: _selectedDate, // Pass the selected date
-        startTime: startDateTime,   // Pass the combined DateTime
-        endTime: endDateTime,       // Pass the combined DateTime
-        venue: _selectedVenue!,
-        createdAt: null, // Let backend handle timestamp
-      );
-
-      try {
-        await _apiService.createLecture(newLecture); // API service uses lecture.toApiJson()
-        if (!mounted) return;
-        Navigator.of(context).pop(true); // Success
-      } catch (e) {
-         if (!mounted) return;
-         // Show specific error from ApiException if available
-         String errorMessage = 'Failed to create lecture.';
-         if (e is ApiException) {
-            errorMessage += ' ${e.message}';
-         } else {
-            errorMessage += ' ${e.toString()}';
-         }
-         _showValidationError(errorMessage);
-      } finally {
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
-      }
-    } else {
+    // --- MODIFIED: Check form validity FIRST ---
+    if (!_formKey.currentState!.validate()) {
        _showValidationError('Please fill in all required fields correctly.');
+       return; // Stop if basic validation fails
     }
+    // --- END MODIFIED ---
+
+    // Check other selections
+    if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
+       _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
+    }
+
+    // Combine Date and Time
+    final DateTime startDateTime = DateTime(
+      _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
+      _selectedStartTime!.hour, _selectedStartTime!.minute,
+    );
+    final DateTime endDateTime = DateTime(
+      _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
+      _selectedEndTime!.hour, _selectedEndTime!.minute,
+    );
+
+    // Validate time order
+    if (!endDateTime.isAfter(startDateTime)) {
+       _showValidationError('End time must be after start time.'); return;
+    }
+
+    // Validate date is not past
+    final DateTime today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    if (_selectedDate!.isBefore(today)) {
+        _showValidationError('Cannot create a lecture for a past date.'); return;
+    }
+
+    // --- ADDED: Get online link value conditionally ---
+    String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
+    // --- END ADDED ---
+
+    setState(() => _isLoading = true);
+
+    // Pass combined DateTime objects AND onlineLink to Lecture constructor
+    final newLecture = Lecture(
+      id: '',
+      lecturerId: widget.currentUser.id,
+      lecturerName: widget.currentUser.name,
+      lecturerPhone: _lecturerPhoneController.text.trim().isEmpty ? null : _lecturerPhoneController.text.trim(),
+      school: widget.currentUser.school ?? 'N/A',
+      department: widget.currentUser.department ?? 'N/A',
+      course: widget.currentUser.course ?? 'N/A',
+      yearOfStudy: _selectedYear!,
+      semester: _selectedSemester!,
+      unitName: _unitNameController.text.trim(),
+      unitCode: _unitCodeController.text.trim(),
+      lectureDate: _selectedDate,
+      startTime: startDateTime,
+      endTime: endDateTime,
+      venue: _selectedVenue!,
+      // --- ADDED: Pass onlineLinkValue ---
+      onlineLink: onlineLinkValue,
+      // --- END ADDED ---
+      createdAt: null, // Let backend handle timestamp
+    );
+
+    try {
+      await _apiService.createLecture(newLecture); // API service uses lecture.toApiJson()
+      if (!mounted) return;
+      Navigator.of(context).pop(true); // Success
+    } catch (e) {
+       if (!mounted) return;
+       // Show specific error from ApiException if available
+       String errorMessage = 'Failed to create lecture.';
+       if (e is ApiException) {
+          errorMessage += ' ${e.message}';
+       } else {
+          errorMessage += ' ${e.toString()}';
+       }
+       _showValidationError(errorMessage);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+    // Removed the redundant else block for form validation
   }
 
   // Helper to show validation error snackbar
@@ -448,11 +451,44 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
                   value: _selectedVenue,
                   items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
+                  // --- MODIFIED: Update state on change ---
                   onChanged: (val) => setState(() => _selectedVenue = val),
+                  // --- END MODIFIED ---
                   validator: (value) => value == null ? 'Venue is required' : null,
                   isExpanded: true,
                 ),
-                // --- End Venue Dropdown ---
+                // --- END Venue Dropdown ---
+
+                // --- Conditional Online Link Field ---
+                // Use AnimatedSize/Visibility for smoother transition (optional)
+                if (_selectedVenue == 'ONLINE') ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _onlineLinkController,
+                    decoration: _inputDecoration(
+                      'Online Lecture Link',
+                      prefixIcon: const Icon(Icons.link_outlined),
+                      isRequired: true, // Required only when venue is ONLINE
+                      hint: 'e.g., https://meet.google.com/abc-xyz'
+                    ),
+                    keyboardType: TextInputType.url,
+                    validator: (value) {
+                      // Only validate if the venue is actually ONLINE
+                      if (_selectedVenue == 'ONLINE') {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Online link is required for ONLINE venue';
+                        }
+                        // Basic URL validation
+                        final uri = Uri.tryParse(value.trim());
+                        if (uri == null || !uri.hasAbsolutePath || !uri.hasScheme || !(uri.isScheme('http') || uri.isScheme('https'))) {
+                           return 'Please enter a valid URL (e.g., https://...)';
+                        }
+                      }
+                      return null; // No error if venue is not ONLINE
+                    },
+                  ),
+                ],
+
               ],
             ),
           ),

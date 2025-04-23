@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:checkmate/constants/dropdown_data.dart';
 
+// --- UpperCaseTextFormatter (Keep as is) ---
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -15,6 +16,7 @@ class UpperCaseTextFormatter extends TextInputFormatter {
     );
   }
 }
+// --- End Formatter ---
 
 class EditLectureDialog extends StatefulWidget {
   final Lecture lecture;
@@ -32,6 +34,9 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
 
   late TextEditingController _unitNameController;
   late TextEditingController _unitCodeController;
+  // --- ADDED: Controller for online link ---
+  late TextEditingController _onlineLinkController;
+  // --- END ADDED ---
 
   String? _selectedYear;
   String? _selectedSemester;
@@ -48,12 +53,16 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
 
     _unitNameController = TextEditingController(text: widget.lecture.unitName);
     _unitCodeController = TextEditingController(text: widget.lecture.unitCode);
+    // --- ADDED: Initialize online link controller ---
+    _onlineLinkController = TextEditingController(text: widget.lecture.onlineLink ?? '');
+    // --- END ADDED ---
 
     _selectedYear = yearsList.contains(widget.lecture.yearOfStudy) ? widget.lecture.yearOfStudy : null;
     _selectedSemester = semestersList.contains(widget.lecture.semester) ? widget.lecture.semester : null;
     _selectedVenue = venuesList.contains(widget.lecture.venue) ? widget.lecture.venue : null;
 
-    _selectedDate = widget.lecture.lectureDate ?? DateTime.now();
+    // Ensure date/time are initialized correctly from the lecture object
+    _selectedDate = widget.lecture.lectureDate?.toLocal() ?? DateTime.now(); // Use local time for display
     _selectedStartTime = widget.lecture.startTime != null
         ? TimeOfDay.fromDateTime(widget.lecture.startTime!.toLocal())
         : TimeOfDay.now();
@@ -66,9 +75,13 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
   void dispose() {
     _unitNameController.dispose();
     _unitCodeController.dispose();
+    // --- ADDED: Dispose online link controller ---
+    _onlineLinkController.dispose();
+    // --- END ADDED ---
     super.dispose();
   }
 
+  // Helper for consistent InputDecoration styling
   InputDecoration _inputDecoration(String label, {String? hint, Widget? prefixIcon, bool isRequired = true}) {
      return InputDecoration(
       labelText: '$label${isRequired ? " *" : ""}',
@@ -103,14 +116,29 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
     );
   }
 
+  // Method to show the date picker
   Future<void> _selectDate(BuildContext context) async {
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
+      initialDate: _selectedDate.isBefore(today) ? today : _selectedDate, // Start from today if current date is past
+      firstDate: today, // Prevent selecting past dates
+      lastDate: today.add(const Duration(days: 365)), // Allow up to one year in the future
+      helpText: 'Select New Lecture Date',
       builder: (context, child) {
-        return Theme( data: ThemeData.light().copyWith( colorScheme: const ColorScheme.light( primary: brandColor, onPrimary: Colors.white, ), textButtonTheme: TextButtonThemeData( style: TextButton.styleFrom(foregroundColor: brandColor), ), ), child: child!, );
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+                  primary: brandColor,
+                  onPrimary: Colors.white,
+                  surface: Colors.white,
+                  onSurface: Colors.black87,
+                ), dialogTheme: DialogThemeData(backgroundColor: Colors.white),
+          ),
+          child: child!,
+        );
       },
     );
     if (picked != null && picked != _selectedDate) {
@@ -118,99 +146,123 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
     }
   }
 
+  // Method to show the time picker
   Future<void> _selectTime(BuildContext context, bool isStartTime) async {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: isStartTime ? _selectedStartTime : _selectedEndTime,
+      helpText: isStartTime ? 'Select New Start Time' : 'Select New End Time',
       builder: (context, child) {
-        return Theme( data: ThemeData.light().copyWith( colorScheme: const ColorScheme.light( primary: brandColor, onPrimary: Colors.white, ), textButtonTheme: TextButtonThemeData( style: TextButton.styleFrom(foregroundColor: brandColor), ), ), child: child!, );
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
+                  primary: brandColor,
+                  onPrimary: Colors.white,
+                  surface: Colors.white,
+                  onSurface: Colors.black87,
+                ),
+             timePickerTheme: const TimePickerThemeData(),
+             dialogTheme: DialogThemeData(backgroundColor: Colors.white),
+          ),
+          child: child!,
+        );
       },
     );
     if (picked != null) {
       setState(() {
         if (isStartTime) {
           _selectedStartTime = picked;
-          if (_selectedEndTime != null) {
-             final startMinutes = _selectedStartTime.hour * 60 + _selectedStartTime.minute;
-             final endMinutes = _selectedEndTime!.hour * 60 + _selectedEndTime!.minute;
-             if(endMinutes <= startMinutes) { _selectedEndTime = TimeOfDay(hour: startMinutes ~/ 60, minute: (startMinutes % 60) + 1); }
-          }
-        } else {
+          // Reset end time if it becomes invalid
+           final startMinutes = _selectedStartTime.hour * 60 + _selectedStartTime.minute;
+           final endMinutes = _selectedEndTime.hour * 60 + _selectedEndTime.minute;
+           if(endMinutes <= startMinutes) {
+              _selectedEndTime = TimeOfDay(hour: (startMinutes + 60) ~/ 60, minute: (startMinutes + 60) % 60); // Default to 1 hour after start
+           }
+                } else {
           _selectedEndTime = picked;
         }
       });
     }
   }
 
+  // Method to handle form submission for update
   Future<void> _updateLecture() async {
+    // --- MODIFIED: Check form validity FIRST ---
     if (!_formKey.currentState!.validate()) {
       _showValidationError('Please fill in all required fields correctly.');
-      return;
+      return; // Stop if basic validation fails
     }
-    if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
+    // --- END MODIFIED ---
+
+    // Check other selections
+    if (_selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
        _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
     }
 
-    final DateTime startDateTime = DateTime(
+    // Combine Date and Time into DateTime objects (using UTC for consistency with backend)
+    final DateTime startDateTime = DateTime.utc(
       _selectedDate.year, _selectedDate.month, _selectedDate.day,
       _selectedStartTime.hour, _selectedStartTime.minute,
     );
-    final DateTime endDateTime = DateTime(
+    final DateTime endDateTime = DateTime.utc(
       _selectedDate.year, _selectedDate.month, _selectedDate.day,
       _selectedEndTime.hour, _selectedEndTime.minute,
     );
 
+    // Validate time order
     if (!endDateTime.isAfter(startDateTime)) {
       _showValidationError('End time must be after start time.');
       return;
     }
 
+    // --- ADDED: Get online link value conditionally ---
+    String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
+    // --- END ADDED ---
+
     setState(() => _isLoading = true);
 
+    // Prepare the data payload for the API
     final Map<String, dynamic> updatedData = {
       'unitName': _unitNameController.text.trim(),
       'unitCode': _unitCodeController.text.trim().toUpperCase(),
       'venue': _selectedVenue,
       'yearOfStudy': _selectedYear,
       'semester': _selectedSemester,
-      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate),
-      'startTime': startDateTime.toUtc().toIso8601String(),
-      'endTime': endDateTime.toUtc().toIso8601String(),
-      'course': widget.lecture.course,
+      // Send dates/times in ISO 8601 format (UTC) as expected by backend
+      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), // Date only part
+      'startTime': startDateTime.toIso8601String(),
+      'endTime': endDateTime.toIso8601String(),
+      // 'course' is usually not editable here, but send it if backend needs it
+      // 'course': widget.lecture.course,
+      // --- ADDED: Include onlineLinkValue (will be null if venue != ONLINE) ---
+      'onlineLink': onlineLinkValue,
+      // --- END ADDED ---
     };
 
     try {
       await apiService.updateLecture(widget.lecture.id, updatedData);
-      if (mounted) { Navigator.of(context).pop(true); }
-    // --- MODIFIED CATCH BLOCK ---
-    } catch (e, stackTrace) { // Add stackTrace parameter
-      // Log detailed error information to the console
+      if (mounted) { Navigator.of(context).pop(true); } // Success
+    } catch (e, stackTrace) {
+      // Log detailed error information
       print("--- Update Lecture Error ---");
       print("Error Type: ${e.runtimeType}");
       print("Error Details: $e");
-      // If it's an ApiException, print the status code too
-      if (e is ApiException) {
-        print("API Status Code: ${e.statusCode}");
-      }
+      if (e is ApiException) { print("API Status Code: ${e.statusCode}"); }
       print("StackTrace: $stackTrace");
       print("--- End Update Lecture Error ---");
 
-      // Show error message to the user (try to use specific message if available)
+      // Show error message to the user
       if (mounted) {
-        String displayMessage = 'An unexpected error occurred.';
-        if (e is ApiException) {
-          displayMessage = e.message; // Use the message from ApiException
-        } else {
-          displayMessage = e.toString(); // Fallback for other error types
-        }
+        String displayMessage = (e is ApiException) ? e.message : e.toString();
         _showValidationError('Failed to update lecture: $displayMessage');
       }
-    // --- END MODIFIED CATCH BLOCK ---
     } finally {
       if (mounted) { setState(() => _isLoading = false); }
     }
+    // Removed redundant else block
   }
 
+  // Helper to show validation error snackbar
   void _showValidationError(String message) {
      if (!mounted) return;
      ScaffoldMessenger.of(context).showSnackBar(
@@ -245,6 +297,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
+                // --- Unit Name ---
                 TextFormField(
                   controller: _unitNameController,
                   decoration: _inputDecoration('Unit Name', prefixIcon: const Icon(Icons.label_outline)),
@@ -253,6 +306,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                   validator: (value) => (value == null || value.trim().isEmpty) ? 'Unit name is required' : null,
                 ),
                 const SizedBox(height: 12),
+
+                // --- Unit Code ---
                 TextFormField(
                   controller: _unitCodeController,
                   decoration: _inputDecoration(
@@ -278,6 +333,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                   },
                 ),
                 const SizedBox(height: 12),
+
+                // --- Course (Read-Only) ---
                 InputDecorator(
                   decoration: _inputDecoration('Course', isRequired: false).copyWith(
                     fillColor: Colors.grey[200],
@@ -286,6 +343,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                   child: Text(widget.lecture.course ?? 'N/A', style: const TextStyle(fontSize: 16)),
                 ),
                 const SizedBox(height: 12),
+
+                // --- Year & Semester Dropdowns ---
                  Row(
                    crossAxisAlignment: CrossAxisAlignment.start,
                    children: [
@@ -313,15 +372,53 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                    ],
                  ),
                 const SizedBox(height: 12),
+
+                // --- Venue Dropdown ---
                 DropdownButtonFormField<String>(
                   decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
                   value: _selectedVenue,
                   items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
+                  // --- MODIFIED: Update state on change ---
                   onChanged: (val) => setState(() => _selectedVenue = val),
+                  // --- END MODIFIED ---
                   validator: (value) => value == null ? 'Venue is required' : null,
                   isExpanded: true,
                 ),
-                const SizedBox(height: 15),
+                // --- END Venue Dropdown ---
+
+                // --- ADDED: Conditional Online Link Field ---
+                if (_selectedVenue == 'ONLINE') ...[
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _onlineLinkController,
+                    decoration: _inputDecoration(
+                      'Online Lecture Link',
+                      prefixIcon: const Icon(Icons.link_outlined),
+                      isRequired: true, // Required only when venue is ONLINE
+                      hint: 'e.g., https://meet.google.com/abc-xyz'
+                    ),
+                    keyboardType: TextInputType.url,
+                    validator: (value) {
+                      // Only validate if the venue is actually ONLINE
+                      if (_selectedVenue == 'ONLINE') {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Online link is required for ONLINE venue';
+                        }
+                        // Basic URL validation
+                        final uri = Uri.tryParse(value.trim());
+                        if (uri == null || !uri.hasAbsolutePath || !uri.hasScheme || !(uri.isScheme('http') || uri.isScheme('https'))) {
+                           return 'Please enter a valid URL (e.g., https://...)';
+                        }
+                      }
+                      return null; // No error if venue is not ONLINE
+                    },
+                  ),
+                ],
+                // --- END ADDED ---
+
+                const SizedBox(height: 15), // Spacing before schedule
+
+                // --- Date/Time Pickers ---
                 Text("Lecture Schedule *", style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 InkWell(
@@ -371,15 +468,17 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                     ),
                   ],
                 ),
+                // --- End Date/Time Pickers ---
               ],
             ),
           ),
         ),
       ),
+      // --- Dialog Actions ---
       actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
       actions: <Widget>[
         TextButton(
-          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false), // Cancel
           child: const Text('Cancel'),
         ),
         ElevatedButton.icon(
@@ -393,9 +492,10 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           ),
-          onPressed: _isLoading ? null : _updateLecture,
+          onPressed: _isLoading ? null : _updateLecture, // Submit
         ),
       ],
+      // --- End Dialog Actions ---
     );
   }
 }

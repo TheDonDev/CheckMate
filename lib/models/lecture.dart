@@ -1,64 +1,47 @@
 // lib/models/lecture.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // For immutable annotation
-import 'package:flutter/material.dart'; // Required for TimeOfDay (still needed for pickers)
+// Removed unused Material import
 import 'package:intl/intl.dart';
 
-// --- Helper Functions ---
-
-// Parses various timestamp formats into a nullable DateTime object (UTC).
+// --- Helper Functions (Keep as they are) ---
 DateTime? _parseDateTime(dynamic timestampData) {
+  // ... (no changes needed here)
   if (timestampData == null) return null;
   try {
     if (timestampData is Timestamp) {
       return timestampData.toDate().toUtc();
     } else if (timestampData is String) {
-      // 1. Try parsing as full ISO 8601 string first
       final dtIso = DateTime.tryParse(timestampData);
       if (dtIso != null) return dtIso.toUtc();
-
-      // 2. Fallback: Try parsing strictly as 'yyyy-MM-dd'
       DateTime? dtYmd;
       try {
-        // Use parseStrict within a try-catch block
         final parsedDate = DateFormat('yyyy-MM-dd').parseStrict(timestampData);
-        // If successful, create DateTime at midnight UTC
         dtYmd = DateTime.utc(parsedDate.year, parsedDate.month, parsedDate.day);
-      } on FormatException {
-        // If parseStrict fails, dtYmd remains null
-        dtYmd = null;
-      }
-      if (dtYmd != null) return dtYmd; // Return if date-only parsing succeeded
-
+      } on FormatException { dtYmd = null; }
+      if (dtYmd != null) return dtYmd;
     } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
-      // Handle potential Firestore Timestamp map representation
       final ts = Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
       return ts.toDate().toUtc();
     } else if (timestampData is int) {
-      // Handle millisecondsSinceEpoch
       return DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
     }
-  } catch (e) {
-    if (kDebugMode) print("Error parsing DateTime: $timestampData, Error: $e");
-  }
-  // If none of the formats match or an error occurs
+  } catch (e) { if (kDebugMode) print("Error parsing DateTime: $timestampData, Error: $e"); }
   if (kDebugMode) print("Unrecognized DateTime format: $timestampData");
   return null;
 }
-
-// Converts a nullable DateTime object to an ISO 8601 UTC string.
 String? _toIso8601UtcString(DateTime? dateTime) {
+  // ... (no changes needed here)
   if (dateTime == null) return null;
-  return dateTime.toUtc().toIso8601String(); // e.g., 2023-10-27T14:30:00.000Z
+  return dateTime.toUtc().toIso8601String();
 }
-
-// Converts a nullable DateTime object to a 'yyyy-MM-dd' string (UTC date).
 String? _toDateOnlyIsoString(DateTime? dateTime) {
+  // ... (no changes needed here)
   if (dateTime == null) return null;
   return DateFormat('yyyy-MM-dd').format(dateTime.toUtc());
 }
+// --- End Helper Functions ---
 
-// --- Lecture Model ---
 
 @immutable
 class Lecture {
@@ -73,11 +56,14 @@ class Lecture {
   final String semester;
   final String unitName;
   final String unitCode;
-  final DateTime? lectureDate; // Can represent just the date or full timestamp depending on usage
-  final DateTime? startTime;   // Represents the specific start date and time
-  final DateTime? endTime;     // Represents the specific end date and time
+  final DateTime? lectureDate;
+  final DateTime? startTime;
+  final DateTime? endTime;
   final String venue;
   final DateTime? createdAt;
+  // --- ADDED: Online Link Field ---
+  final String? onlineLink;
+  // --- END ADDED ---
 
   const Lecture({
     required this.id,
@@ -96,29 +82,22 @@ class Lecture {
     required this.endTime,
     required this.venue,
     this.createdAt,
+    // --- ADDED: To constructor ---
+    this.onlineLink,
+    // --- END ADDED ---
   });
 
-  // --- Formatting Getters ---
-  String get formattedDate => lectureDate != null
-      ? DateFormat.yMMMEd().format(lectureDate!.toLocal()) // Format date part
-      : 'N/A';
-
-  String get formattedStartTime => startTime != null
-      ? DateFormat.jm().format(startTime!.toLocal()) // e.g., 9:30 AM
-      : 'N/A';
-  String get formattedEndTime => endTime != null
-      ? DateFormat.jm().format(endTime!.toLocal()) // e.g., 11:00 AM
-      : 'N/A';
-
-  String get formattedCreatedAt => createdAt != null
-      ? DateFormat.yMd().add_jm().format(createdAt!.toLocal()) // Full date and time
-      : 'N/A';
+  // --- Formatting Getters (Keep as they are) ---
+  String get formattedDate => lectureDate != null ? DateFormat.yMMMEd().format(lectureDate!.toLocal()) : 'N/A';
+  String get formattedStartTime => startTime != null ? DateFormat.jm().format(startTime!.toLocal()) : 'N/A';
+  String get formattedEndTime => endTime != null ? DateFormat.jm().format(endTime!.toLocal()) : 'N/A';
+  String get formattedCreatedAt => createdAt != null ? DateFormat.yMd().add_jm().format(createdAt!.toLocal()) : 'N/A';
+  // --- End Formatting Getters ---
 
 
   // --- Firestore Conversion ---
   factory Lecture.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
-
     return Lecture(
       id: doc.id,
       lecturerId: data['lecturerId'] as String? ?? '',
@@ -136,6 +115,9 @@ class Lecture {
       endTime: _parseDateTime(data['endTime']),
       venue: data['venue'] as String? ?? '',
       createdAt: _parseDateTime(data['createdAt']),
+      // --- ADDED: Parse from Firestore data ---
+      onlineLink: data['onlineLink'] as String?,
+      // --- END ADDED ---
     );
   }
 
@@ -155,7 +137,10 @@ class Lecture {
       'lectureDate': lectureDate != null ? Timestamp.fromDate(lectureDate!) : null,
       'startTime': startTime != null ? Timestamp.fromDate(startTime!) : null,
       'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
-      // 'createdAt' is usually set by the server on creation
+      // --- ADDED: Include in Firestore data if not null ---
+      if (onlineLink != null) 'onlineLink': onlineLink,
+      // --- END ADDED ---
+      // 'createdAt' is usually set by the server
     };
   }
   // --- End Firestore Conversion ---
@@ -180,6 +165,9 @@ class Lecture {
       endTime: _parseDateTime(json['endTime']),
       venue: json['venue'] as String? ?? '',
       createdAt: _parseDateTime(json['createdAt']),
+      // --- ADDED: Parse from API JSON ---
+      onlineLink: json['onlineLink'] as String?,
+      // --- END ADDED ---
     );
   }
 
@@ -194,10 +182,12 @@ class Lecture {
       'unitName': unitName,
       'unitCode': unitCode,
       'venue': venue,
-      // Send dates/times as full ISO 8601 UTC strings
-      'lectureDate': _toDateOnlyIsoString(lectureDate), // Keep as 'yyyy-MM-dd' if backend expects that
-      'startTime': _toIso8601UtcString(startTime), // Send full ISO string
-      'endTime': _toIso8601UtcString(endTime),     // Send full ISO string
+      'lectureDate': _toDateOnlyIsoString(lectureDate),
+      'startTime': _toIso8601UtcString(startTime),
+      'endTime': _toIso8601UtcString(endTime),
+      // --- ADDED: Include in API JSON if not null ---
+      if (onlineLink != null) 'onlineLink': onlineLink,
+      // --- END ADDED ---
       // 'createdAt' is usually set by the server
     };
   }
@@ -222,11 +212,17 @@ class Lecture {
     DateTime? endTime,
     String? venue,
     DateTime? createdAt,
+    // --- ADDED: onlineLink parameter ---
+    String? onlineLink,
+    // --- END ADDED ---
     bool setLecturerPhoneNull = false,
     bool setLectureDateNull = false,
     bool setStartTimeNull = false,
     bool setEndTimeNull = false,
     bool setCreatedAtNull = false,
+    // --- ADDED: Flag for onlineLink ---
+    bool setOnlineLinkNull = false,
+    // --- END ADDED ---
   }) {
     return Lecture(
       id: id ?? this.id,
@@ -245,12 +241,17 @@ class Lecture {
       endTime: setEndTimeNull ? null : (endTime ?? this.endTime),
       venue: venue ?? this.venue,
       createdAt: setCreatedAtNull ? null : (createdAt ?? this.createdAt),
+      // --- ADDED: Handle onlineLink in copyWith ---
+      onlineLink: setOnlineLinkNull ? null : (onlineLink ?? this.onlineLink),
+      // --- END ADDED ---
     );
   }
 
   @override
   String toString() {
-    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: ${_toDateOnlyIsoString(lectureDate)}, start: ${_toIso8601UtcString(startTime)}, end: ${_toIso8601UtcString(endTime)}, venue: $venue)';
+    // Add onlineLink to toString if present
+    String linkInfo = onlineLink != null ? ', link: $onlineLink' : '';
+    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: ${_toDateOnlyIsoString(lectureDate)}, start: ${_toIso8601UtcString(startTime)}, end: ${_toIso8601UtcString(endTime)}, venue: $venue$linkInfo)';
   }
 
   @override
@@ -273,7 +274,10 @@ class Lecture {
       other.startTime == startTime &&
       other.endTime == endTime &&
       other.venue == venue &&
-      other.createdAt == createdAt;
+      other.createdAt == createdAt &&
+      // --- ADDED: Compare onlineLink ---
+      other.onlineLink == onlineLink;
+      // --- END ADDED ---
   }
 
   @override
@@ -294,5 +298,8 @@ class Lecture {
         endTime,
         venue,
         createdAt,
+        // --- ADDED: Hash onlineLink ---
+        onlineLink,
+        // --- END ADDED ---
       );
 }

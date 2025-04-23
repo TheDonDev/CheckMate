@@ -67,6 +67,7 @@ class AttendanceRecord {
   final Timestamp? checkInTime;
   final bool checkedIn; // Using checkedIn as per your provided code
   final String? checkedInBy; // Lecturer's User ID who checked them in
+  final String? percentage; 
 
   const AttendanceRecord({ // Use const constructor
     required this.id,
@@ -78,6 +79,7 @@ class AttendanceRecord {
     required this.checkedIn, // Use checkedIn
     this.checkInTime,
     this.checkedInBy,
+    this.percentage,
   });
 
   // --- Formatting Getters (Optional, for UI) ---
@@ -99,6 +101,7 @@ class AttendanceRecord {
       checkedIn: _parseBool(data['checkedIn']), // Use checkedIn and safe parsing
       checkInTime: _parseTimestamp(data['checkInTime']),
       checkedInBy: data['checkedInBy'] as String?,
+      percentage: data['percentage'] as String?,
     );
   }
 
@@ -113,6 +116,7 @@ class AttendanceRecord {
       'checkedIn': checkedIn, // Use checkedIn
       'checkInTime': checkInTime,
       'checkedInBy': checkedInBy,
+      'percentage': percentage,
     };
   }
   // --- End Firestore Conversion ---
