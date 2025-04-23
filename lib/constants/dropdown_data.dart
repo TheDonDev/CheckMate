@@ -38,7 +38,6 @@ const Map<String, List<String>> departmentsMap = {
 /// Map linking schools to the courses offered within them.
 /// Keys are school names (must match entries in [schoolsList]).
 /// Values are lists of course names offered in that school.
-/// Note: It might be more accurate to link courses to *departments*, but this structure links them to schools as provided.
 const Map<String, List<String>> coursesMap = {
   "School of Health Sciences": [
     "Master’s in Public Health",
@@ -84,7 +83,6 @@ const Map<String, List<String>> coursesMap = {
 };
 
 /// List of specific venues or locations within the university.
-/// Used potentially for scheduling or location selection elsewhere in the app.
 const List<String> venuesList = [
   "SKILLS LAB HALL (TU)", // SL-HALL
   "SKILLS LAB HALL-ANNEX 1 (TU)", // SL-A1
@@ -111,10 +109,10 @@ const List<String> venuesList = [
   "LIBRARY LECTURE HALL 4 (LIBRARY 4TH FLOOR)", // LIB-LH4
   "GEOGRAPHY LAB (FORMER LIBRARY)", // GEO-LB
   "COUNSELING PSYCHOLOGY LAB (FORMER LIBRARY)", // CP-LB
+  "ONLINE",
 ];
 
 /// List of academic years of study for students.
-/// Used in the registration screen for students.
 const List<String> yearsList = [
   "1st Year",
   "2nd Year",
@@ -124,7 +122,6 @@ const List<String> yearsList = [
 ];
 
 /// List of academic semesters.
-/// Used in the registration screen for students.
 const List<String> semestersList = [
   "Semester 1",
   "Semester 2"

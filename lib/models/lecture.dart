@@ -1,50 +1,71 @@
 // lib/models/lecture.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // For immutable annotation
+import 'package:flutter/material.dart'; // Required for TimeOfDay (still needed for pickers)
 import 'package:intl/intl.dart';
 
-// --- Helper Functions (Consider moving to a dedicated utility file) ---
+// --- Helper Functions ---
 
-// Parses various timestamp formats (Firestore Timestamp, ISO String, int milliseconds)
-// into a nullable DateTime object (UTC).
+// Parses various timestamp formats into a nullable DateTime object (UTC).
 DateTime? _parseDateTime(dynamic timestampData) {
   if (timestampData == null) return null;
   try {
     if (timestampData is Timestamp) {
-      return timestampData.toDate().toUtc(); // Convert Firestore Timestamp to UTC DateTime
+      return timestampData.toDate().toUtc();
     } else if (timestampData is String) {
-      // Assume ISO 8601 string
-      return DateTime.parse(timestampData).toUtc();
+      // 1. Try parsing as full ISO 8601 string first
+      final dtIso = DateTime.tryParse(timestampData);
+      if (dtIso != null) return dtIso.toUtc();
+
+      // 2. Fallback: Try parsing strictly as 'yyyy-MM-dd'
+      DateTime? dtYmd;
+      try {
+        // Use parseStrict within a try-catch block
+        final parsedDate = DateFormat('yyyy-MM-dd').parseStrict(timestampData);
+        // If successful, create DateTime at midnight UTC
+        dtYmd = DateTime.utc(parsedDate.year, parsedDate.month, parsedDate.day);
+      } on FormatException {
+        // If parseStrict fails, dtYmd remains null
+        dtYmd = null;
+      }
+      if (dtYmd != null) return dtYmd; // Return if date-only parsing succeeded
+
     } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
-      // Handle Firestore-like map (less common on client)
+      // Handle potential Firestore Timestamp map representation
       final ts = Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
       return ts.toDate().toUtc();
     } else if (timestampData is int) {
-      // Assume milliseconds since epoch
+      // Handle millisecondsSinceEpoch
       return DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
     }
   } catch (e) {
-    print("Error parsing DateTime: $timestampData, Error: $e");
+    if (kDebugMode) print("Error parsing DateTime: $timestampData, Error: $e");
   }
-  print("Unrecognized DateTime format: $timestampData");
-  return null; // Return null if parsing fails
+  // If none of the formats match or an error occurs
+  if (kDebugMode) print("Unrecognized DateTime format: $timestampData");
+  return null;
 }
 
 // Converts a nullable DateTime object to an ISO 8601 UTC string.
 String? _toIso8601UtcString(DateTime? dateTime) {
   if (dateTime == null) return null;
-  // Ensure the DateTime is treated as UTC before formatting
-  return dateTime.toUtc().toIso8601String();
+  return dateTime.toUtc().toIso8601String(); // e.g., 2023-10-27T14:30:00.000Z
+}
+
+// Converts a nullable DateTime object to a 'yyyy-MM-dd' string (UTC date).
+String? _toDateOnlyIsoString(DateTime? dateTime) {
+  if (dateTime == null) return null;
+  return DateFormat('yyyy-MM-dd').format(dateTime.toUtc());
 }
 
 // --- Lecture Model ---
 
-@immutable // Mark class as immutable
+@immutable
 class Lecture {
   final String id;
   final String lecturerId;
   final String lecturerName;
-  final String? lecturerPhone; // Made nullable to match backend logic
+  final String? lecturerPhone;
   final String school;
   final String department;
   final String course;
@@ -52,17 +73,17 @@ class Lecture {
   final String semester;
   final String unitName;
   final String unitCode;
-  final DateTime? lectureDate; // Changed to nullable DateTime
-  final DateTime? startTime;   // Changed to nullable DateTime
-  final DateTime? endTime;     // Changed to nullable DateTime
+  final DateTime? lectureDate; // Can represent just the date or full timestamp depending on usage
+  final DateTime? startTime;   // Represents the specific start date and time
+  final DateTime? endTime;     // Represents the specific end date and time
   final String venue;
-  final DateTime? createdAt;   // Changed to nullable DateTime
+  final DateTime? createdAt;
 
-  const Lecture({ // Use const constructor
+  const Lecture({
     required this.id,
     required this.lecturerId,
     required this.lecturerName,
-    this.lecturerPhone, // Nullable
+    this.lecturerPhone,
     required this.school,
     required this.department,
     required this.course,
@@ -70,22 +91,31 @@ class Lecture {
     required this.semester,
     required this.unitName,
     required this.unitCode,
-    required this.lectureDate, // Keep required based on backend validation
-    required this.startTime,   // Keep required based on backend validation
-    required this.endTime,     // Keep required based on backend validation
+    required this.lectureDate,
+    required this.startTime,
+    required this.endTime,
     required this.venue,
-    this.createdAt, // Nullable, often set by server
+    this.createdAt,
   });
 
-  // --- Formatting Getters (for UI display, handle nulls) ---
-  String get formattedDate => lectureDate != null ? DateFormat.yMMMEd().format(lectureDate!.toLocal()) : 'N/A';
-  String get formattedStartTime => startTime != null ? DateFormat.jm().format(startTime!.toLocal()) : 'N/A';
-  String get formattedEndTime => endTime != null ? DateFormat.jm().format(endTime!.toLocal()) : 'N/A';
-  String get formattedCreatedAt => createdAt != null ? DateFormat.yMd().add_jm().format(createdAt!.toLocal()) : 'N/A';
+  // --- Formatting Getters ---
+  String get formattedDate => lectureDate != null
+      ? DateFormat.yMMMEd().format(lectureDate!.toLocal()) // Format date part
+      : 'N/A';
+
+  String get formattedStartTime => startTime != null
+      ? DateFormat.jm().format(startTime!.toLocal()) // e.g., 9:30 AM
+      : 'N/A';
+  String get formattedEndTime => endTime != null
+      ? DateFormat.jm().format(endTime!.toLocal()) // e.g., 11:00 AM
+      : 'N/A';
+
+  String get formattedCreatedAt => createdAt != null
+      ? DateFormat.yMd().add_jm().format(createdAt!.toLocal()) // Full date and time
+      : 'N/A';
 
 
   // --- Firestore Conversion ---
-  // Creates a Lecture object from a Firestore DocumentSnapshot
   factory Lecture.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
 
@@ -93,7 +123,7 @@ class Lecture {
       id: doc.id,
       lecturerId: data['lecturerId'] as String? ?? '',
       lecturerName: data['lecturerName'] as String? ?? 'N/A',
-      lecturerPhone: data['lecturerPhone'] as String?, // Nullable
+      lecturerPhone: data['lecturerPhone'] as String?,
       school: data['school'] as String? ?? '',
       department: data['department'] as String? ?? '',
       course: data['course'] as String? ?? '',
@@ -101,22 +131,19 @@ class Lecture {
       semester: data['semester'] as String? ?? '',
       unitName: data['unitName'] as String? ?? '',
       unitCode: data['unitCode'] as String? ?? '',
-      lectureDate: _parseDateTime(data['lectureDate']), // Use helper
-      startTime: _parseDateTime(data['startTime']),     // Use helper
-      endTime: _parseDateTime(data['endTime']),         // Use helper
+      lectureDate: _parseDateTime(data['lectureDate']),
+      startTime: _parseDateTime(data['startTime']),
+      endTime: _parseDateTime(data['endTime']),
       venue: data['venue'] as String? ?? '',
-      createdAt: _parseDateTime(data['createdAt']),     // Use helper
+      createdAt: _parseDateTime(data['createdAt']),
     );
   }
 
-  // Converts Lecture object to a Map suitable for writing TO Firestore
-  // Less common if creation/updates happen via API, but useful for direct interaction.
   Map<String, dynamic> toFirestore() {
     return {
-      // 'id' is the document ID, not usually stored within the document itself
       'lecturerId': lecturerId,
       'lecturerName': lecturerName,
-      if (lecturerPhone != null) 'lecturerPhone': lecturerPhone, // Only include if not null
+      if (lecturerPhone != null) 'lecturerPhone': lecturerPhone,
       'school': school,
       'department': department,
       'course': course,
@@ -125,27 +152,22 @@ class Lecture {
       'unitName': unitName,
       'unitCode': unitCode,
       'venue': venue,
-      // Convert DateTime back to Firestore Timestamp or null
       'lectureDate': lectureDate != null ? Timestamp.fromDate(lectureDate!) : null,
       'startTime': startTime != null ? Timestamp.fromDate(startTime!) : null,
       'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
-      // 'createdAt' is usually set by the server (FieldValue.serverTimestamp()) on creation
-      // Only include if explicitly updating or needing to store client-set time
-      // 'createdAt': createdAt != null ? Timestamp.fromDate(createdAt!) : null,
+      // 'createdAt' is usually set by the server on creation
     };
   }
   // --- End Firestore Conversion ---
 
 
   // --- API Conversion Methods ---
-  // Creates a Lecture object from a JSON map received FROM the API
   factory Lecture.fromApiJson(Map<String, dynamic> json) {
     return Lecture(
-      // Use 'id' or '_id' depending on your backend API convention
       id: json['id'] as String? ?? json['_id'] as String? ?? '',
       lecturerId: json['lecturerId'] as String? ?? '',
       lecturerName: json['lecturerName'] as String? ?? 'N/A',
-      lecturerPhone: json['lecturerPhone'] as String?, // Nullable
+      lecturerPhone: json['lecturerPhone'] as String?,
       school: json['school'] as String? ?? '',
       department: json['department'] as String? ?? '',
       course: json['course'] as String? ?? '',
@@ -153,22 +175,17 @@ class Lecture {
       semester: json['semester'] as String? ?? '',
       unitName: json['unitName'] as String? ?? '',
       unitCode: json['unitCode'] as String? ?? '',
-      // Parse dates/times from API format (likely ISO strings) using helper
       lectureDate: _parseDateTime(json['lectureDate']),
       startTime: _parseDateTime(json['startTime']),
       endTime: _parseDateTime(json['endTime']),
       venue: json['venue'] as String? ?? '',
-      createdAt: _parseDateTime(json['createdAt']), // Use 'createdAt' or API field name
+      createdAt: _parseDateTime(json['createdAt']),
     );
   }
 
-  // Converts Lecture object to a JSON map suitable for sending TO the API
   Map<String, dynamic> toApiJson() {
     return {
-      // Don't usually send 'id' when creating via API
-      // 'lecturerId' might be inferred from auth token on backend
-      // 'lecturerName' might be inferred from auth token on backend
-      if (lecturerPhone != null) 'lecturerPhone': lecturerPhone, // Send if available
+      if (lecturerPhone != null) 'lecturerPhone': lecturerPhone,
       'school': school,
       'department': department,
       'course': course,
@@ -177,11 +194,11 @@ class Lecture {
       'unitName': unitName,
       'unitCode': unitCode,
       'venue': venue,
-      // Send dates/timestamps as ISO strings (UTC)
-      'lectureDate': _toIso8601UtcString(lectureDate),
-      'startTime': _toIso8601UtcString(startTime),
-      'endTime': _toIso8601UtcString(endTime),
-      // 'createdAt' is usually set by the server, don't send unless API requires it
+      // Send dates/times as full ISO 8601 UTC strings
+      'lectureDate': _toDateOnlyIsoString(lectureDate), // Keep as 'yyyy-MM-dd' if backend expects that
+      'startTime': _toIso8601UtcString(startTime), // Send full ISO string
+      'endTime': _toIso8601UtcString(endTime),     // Send full ISO string
+      // 'createdAt' is usually set by the server
     };
   }
   // --- End API Conversion ---
@@ -205,7 +222,6 @@ class Lecture {
     DateTime? endTime,
     String? venue,
     DateTime? createdAt,
-    // Flags for explicitly setting nullable fields to null
     bool setLecturerPhoneNull = false,
     bool setLectureDateNull = false,
     bool setStartTimeNull = false,
@@ -234,11 +250,9 @@ class Lecture {
 
   @override
   String toString() {
-    // Provide a more informative default toString
-    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: ${lectureDate?.toIso8601String()}, start: ${startTime?.toIso8601String()}, end: ${endTime?.toIso8601String()}, venue: $venue)';
+    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: ${_toDateOnlyIsoString(lectureDate)}, start: ${_toIso8601UtcString(startTime)}, end: ${_toIso8601UtcString(endTime)}, venue: $venue)';
   }
 
-  // Implement == and hashCode based on all fields for proper comparison
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;

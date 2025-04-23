@@ -260,37 +260,43 @@ class ApiService {
     }
   }
 
-  /// Deletes a lecture via the backend API.
+  // --- ADDED: Update Lecture Method ---
+  /// Updates an existing lecture via the backend API.
   /// Requires authentication, backend must verify ownership or admin role.
-  Future<void> deleteLecture(String lectureId) async {
-    // Endpoint assumes backend route is DELETE /lectures/{lectureId}
+  Future<Lecture> updateLecture(String lectureId, Map<String, dynamic> lectureData) async {
+    // Endpoint assumes backend route is PUT or PATCH /lectures/{lectureId}
     final uri = Uri.parse('$_baseUrl/lectures/$lectureId');
-    if (kDebugMode) print("API Request: DELETE $uri");
+    final requestBody = jsonEncode(lectureData);
+    if (kDebugMode) print("API Request: PUT $uri with body: $requestBody"); // Assuming PUT, change if PATCH
     try {
-      final response = await http.delete(
+      final response = await http.put( // Use http.patch if your backend uses PATCH
         uri,
-        headers: await _getHeaders(includeContentType: false), // Auth needed, no body
+        headers: await _getHeaders(), // Auth needed, Content-Type included
+        body: requestBody,
       );
-      // _handleResponse will throw ApiException on non-2xx status codes (like 403, 404, 500)
-      // It returns null for 204 No Content
-      _handleResponse(response);
-      // If no exception is thrown, deletion was successful
-      return;
+      // Use _handleResponse which throws on error or returns decoded JSON
+      final Map<String, dynamic> data = _handleResponse(response);
+      // Expect the updated lecture object back from the API
+      return Lecture.fromApiJson(data);
     } catch (e) {
-        if (kDebugMode) print("Error in deleteLecture: $e");
+        if (kDebugMode) print("Error in updateLecture: $e");
         // Provide more specific feedback based on potential API error messages
         if (e is ApiException) {
             if (e.statusCode == 403) { // Forbidden
-                throw ApiException('Unauthorized: You do not have permission to delete this lecture.', statusCode: e.statusCode);
+                throw ApiException('Unauthorized: You do not have permission to update this lecture.', statusCode: e.statusCode);
             } else if (e.statusCode == 404) { // Not Found
-                throw ApiException('Delete failed: Lecture not found.', statusCode: e.statusCode);
+                throw ApiException('Update failed: Lecture not found.', statusCode: e.statusCode);
+            } else if (e.statusCode == 400) { // Bad Request
+                throw ApiException('Update failed: Invalid data provided. ${e.message}', statusCode: e.statusCode);
             }
             rethrow; // Rethrow other specific API exceptions
         }
         // Wrap generic errors
-        throw ApiException("Failed to delete lecture: ${e.toString()}");
+        throw ApiException("Failed to update lecture: ${e.toString()}");
     }
   }
+  // --- END Update Lecture Method ---
+
 
   // --- Attendance API Methods ---
 

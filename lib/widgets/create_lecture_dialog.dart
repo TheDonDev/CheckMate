@@ -45,8 +45,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   String? _selectedSemester;
   String? _selectedVenue;
   DateTime? _selectedDate;
-  TimeOfDay? _selectedStartTime;
-  TimeOfDay? _selectedEndTime;
+  TimeOfDay? _selectedStartTime; // Keep as TimeOfDay for picker state
+  TimeOfDay? _selectedEndTime;   // Keep as TimeOfDay for picker state
 
   bool _isLoading = false;
 
@@ -54,9 +54,9 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   void initState() {
     super.initState();
     // Pre-fill lecturer's phone if available
-    // Assuming currentUser.phoneNumber is non-nullable String based on usage.
-    // If it CAN be null, you'd need: widget.currentUser.phoneNumber ?? ''
-    _lecturerPhoneController.text = widget.currentUser.phoneNumber;
+    _lecturerPhoneController.text = widget.currentUser.phoneNumber ?? '';
+    // Optionally set initial date to today
+    // _selectedDate = DateTime.now();
   }
 
   @override
@@ -71,7 +71,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   // Helper for consistent InputDecoration styling
   InputDecoration _inputDecoration(String label, {String? hint, Widget? prefixIcon, bool isRequired = true}) {
     return InputDecoration(
-      labelText: '$label${isRequired ? " *" : ""}', // Add asterisk for required fields
+      labelText: '$label${isRequired ? " *" : ""}',
       hintText: hint,
       prefixIcon: prefixIcon != null
           ? IconTheme(
@@ -97,7 +97,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         borderSide: BorderSide(color: Theme.of(context).colorScheme.error, width: 1.5),
       ),
       filled: true,
-      fillColor: Colors.grey[100], // Subtle background fill
+      fillColor: Colors.grey[100],
       contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
       errorStyle: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.error),
     );
@@ -106,11 +106,17 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   // Method to show the date picker
   Future<void> _pickDate() async {
     final DateTime now = DateTime.now();
+    // --- MODIFICATION: Set firstDate to today (ignoring time) ---
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    // --- END MODIFICATION ---
+
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? now,
-      firstDate: DateTime(now.year, now.month, now.day),
-      lastDate: now.add(const Duration(days: 365)),
+      initialDate: _selectedDate ?? today, // Default initial date to today
+      // --- MODIFICATION: Use 'today' as the first selectable date ---
+      firstDate: today,
+      // --- END MODIFICATION ---
+      lastDate: today.add(const Duration(days: 365)), // Allow up to one year in the future from today
       helpText: 'Select Lecture Date',
       builder: (context, child) {
         return Theme(
@@ -161,10 +167,13 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       setState(() {
         if (isStartTime) {
           _selectedStartTime = picked;
+          // Reset end time if it becomes invalid
           if (_selectedEndTime != null) {
-             final startDateTime = DateTime(1, 1, 1, _selectedStartTime!.hour, _selectedStartTime!.minute);
-             final endDateTime = DateTime(1, 1, 1, _selectedEndTime!.hour, _selectedEndTime!.minute);
-             if(endDateTime.isBefore(startDateTime)) { _selectedEndTime = null; }
+             final startMinutes = _selectedStartTime!.hour * 60 + _selectedStartTime!.minute;
+             final endMinutes = _selectedEndTime!.hour * 60 + _selectedEndTime!.minute;
+             if(endMinutes <= startMinutes) {
+                _selectedEndTime = null; // Or suggest a time slightly after start
+             }
           }
         } else {
           _selectedEndTime = picked;
@@ -175,59 +184,76 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
   // Method to handle form submission
   Future<void> _submitForm() async {
-    // Validate the form fields (excluding the now read-only School/Dept/Course)
     if (_formKey.currentState!.validate()) {
-      // Perform additional validation for date/time pickers and other required fields
       if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
          _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
       }
-      // Combine date and time into DateTime objects
+
+      // Combine Date and Time into DateTime objects
       final DateTime startDateTime = DateTime(
-          _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
-          _selectedStartTime!.hour, _selectedStartTime!.minute
+        _selectedDate!.year,
+        _selectedDate!.month,
+        _selectedDate!.day,
+        _selectedStartTime!.hour,
+        _selectedStartTime!.minute,
       );
       final DateTime endDateTime = DateTime(
-          _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
-          _selectedEndTime!.hour, _selectedEndTime!.minute
+        _selectedDate!.year,
+        _selectedDate!.month,
+        _selectedDate!.day,
+        _selectedEndTime!.hour,
+        _selectedEndTime!.minute,
       );
+
       // Validate end time is after start time
       if (!endDateTime.isAfter(startDateTime)) {
          _showValidationError('End time must be after start time.'); return;
       }
 
-      // Set loading state
+      // --- ADDED: Validate selected date is not in the past (redundant due to picker, but good practice) ---
+      final DateTime today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+      if (_selectedDate!.isBefore(today)) {
+          _showValidationError('Cannot create a lecture for a past date.'); return;
+      }
+      // --- END ADDED VALIDATION ---
+
+
       setState(() => _isLoading = true);
 
-      // Create Lecture object using data from currentUser for restricted fields
+      // Pass combined DateTime objects to Lecture constructor
       final newLecture = Lecture(
-        id: '', // ID will be generated by backend/Firestore
+        id: '',
         lecturerId: widget.currentUser.id,
         lecturerName: widget.currentUser.name,
         lecturerPhone: _lecturerPhoneController.text.trim().isEmpty ? null : _lecturerPhoneController.text.trim(),
-        // *** FIX: Use null-coalescing operator (??) to provide a default value ***
-        school: widget.currentUser.school ?? 'N/A', // Provide default if null
-        department: widget.currentUser.department ?? 'N/A', // Provide default if null
-        course: widget.currentUser.course ?? 'N/A', // Provide default if null
-        // *** End restricted fields ***
+        school: widget.currentUser.school ?? 'N/A',
+        department: widget.currentUser.department ?? 'N/A',
+        course: widget.currentUser.course ?? 'N/A',
         yearOfStudy: _selectedYear!,
         semester: _selectedSemester!,
         unitName: _unitNameController.text.trim(),
         unitCode: _unitCodeController.text.trim(),
-        lectureDate: _selectedDate,
-        startTime: startDateTime,
-        endTime: endDateTime,
+        lectureDate: _selectedDate, // Pass the selected date
+        startTime: startDateTime,   // Pass the combined DateTime
+        endTime: endDateTime,       // Pass the combined DateTime
         venue: _selectedVenue!,
-        createdAt: null, // Let backend/server set the creation timestamp
+        createdAt: null, // Let backend handle timestamp
       );
 
       try {
-        // Call the API service to create the lecture in the backend
-        await _apiService.createLecture(newLecture);
-        if (!mounted) return; // Check mount status after async gap
-        Navigator.of(context).pop(true); // Pop dialog with 'true' on success
+        await _apiService.createLecture(newLecture); // API service uses lecture.toApiJson()
+        if (!mounted) return;
+        Navigator.of(context).pop(true); // Success
       } catch (e) {
-         if (!mounted) return; // Check mount status after async gap
-         _showValidationError('Failed to create lecture: ${e.toString()}');
+         if (!mounted) return;
+         // Show specific error from ApiException if available
+         String errorMessage = 'Failed to create lecture.';
+         if (e is ApiException) {
+            errorMessage += ' ${e.message}';
+         } else {
+            errorMessage += ' ${e.toString()}';
+         }
+         _showValidationError(errorMessage);
       } finally {
         if (mounted) {
           setState(() => _isLoading = false);
@@ -267,7 +293,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                // Display lecturer name (read-only)
+                // --- Read-Only Fields ---
                 InputDecorator(
                   decoration: _inputDecoration('Lecturer', isRequired: false).copyWith(
                     fillColor: Colors.grey[200],
@@ -276,74 +302,60 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   child: Text(widget.currentUser.name, style: const TextStyle(fontSize: 16)),
                 ),
                 const SizedBox(height: 15),
-
-                // Lecturer Phone (Pre-filled, optional validation)
                 TextFormField(
                   controller: _lecturerPhoneController,
                   decoration: _inputDecoration('Your Phone Number', prefixIcon: const Icon(Icons.phone_outlined), isRequired: false),
                   keyboardType: TextInputType.phone,
-                  // validator: (value) { ... } // Optional phone validation
                 ),
                 const SizedBox(height: 12),
-
-                // --- MODIFIED: Display School (Read-Only) ---
                 InputDecorator(
                   decoration: _inputDecoration('School', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200], // Disabled look
+                    fillColor: Colors.grey[200],
                     prefixIcon: Icon(Icons.school_outlined, color: CreateLectureDialog.brandColor.withOpacity(0.7)),
                   ),
-                  // *** FIX: Use null-coalescing operator (??) for Text widget ***
                   child: Text(widget.currentUser.school ?? 'N/A', style: const TextStyle(fontSize: 16)),
                 ),
                 const SizedBox(height: 12),
-
-                // --- MODIFIED: Display Department (Read-Only) ---
                 InputDecorator(
                   decoration: _inputDecoration('Department', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200], // Disabled look
+                    fillColor: Colors.grey[200],
                     prefixIcon: Icon(Icons.business_outlined, color: CreateLectureDialog.brandColor.withOpacity(0.7)),
                   ),
-                  // *** FIX: Use null-coalescing operator (??) for Text widget ***
                   child: Text(widget.currentUser.department ?? 'N/A', style: const TextStyle(fontSize: 16)),
                 ),
                 const SizedBox(height: 12),
-
-                // --- MODIFIED: Display Course (Read-Only) ---
                 InputDecorator(
                   decoration: _inputDecoration('Course', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200], // Disabled look
+                    fillColor: Colors.grey[200],
                     prefixIcon: Icon(Icons.book_outlined, color: CreateLectureDialog.brandColor.withOpacity(0.7)),
                   ),
-                  // *** FIX: Use null-coalescing operator (??) for Text widget ***
                   child: Text(widget.currentUser.course ?? 'N/A', style: const TextStyle(fontSize: 16)),
                 ),
                 const SizedBox(height: 12),
-                // --- END MODIFIED Read-Only Fields ---
+                // --- End Read-Only Fields ---
 
-                // --- Dropdowns for Year, Semester, Venue (Unchanged) ---
+                // --- Dropdowns ---
                 DropdownButtonFormField<String>(
                   decoration: _inputDecoration('Year of Study', prefixIcon: const Icon(Icons.calendar_view_day_outlined)),
                   value: _selectedYear,
-                  // Assuming yearsList comes from dropdown_data.dart
                   items: yearsList.map((String year) => DropdownMenuItem<String>(value: year, child: Text(year))).toList(),
                   onChanged: (String? newValue) { setState(() { _selectedYear = newValue; }); },
                   validator: (value) => value == null ? 'Year of study is required' : null,
                   isExpanded: true,
                 ),
                 const SizedBox(height: 12),
-
                 DropdownButtonFormField<String>(
                   decoration: _inputDecoration('Semester', prefixIcon: const Icon(Icons.filter_list_alt)),
                   value: _selectedSemester,
-                  // Assuming semestersList comes from dropdown_data.dart
                   items: semestersList.map((String semester) => DropdownMenuItem<String>(value: semester, child: Text(semester))).toList(),
                   onChanged: (String? newValue) { setState(() { _selectedSemester = newValue; }); },
                   validator: (value) => value == null ? 'Semester is required' : null,
                   isExpanded: true,
                 ),
                 const SizedBox(height: 12),
+                // --- End Dropdowns ---
 
-                // --- Unit Name (Unchanged) ---
+                // --- Unit Name & Code ---
                 TextFormField(
                   controller: _unitNameController,
                   decoration: _inputDecoration('Unit Name', prefixIcon: const Icon(Icons.label_outline)),
@@ -352,8 +364,6 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   validator: (value) => (value == null || value.trim().isEmpty) ? 'Unit name is required' : null,
                 ),
                 const SizedBox(height: 12),
-
-                // --- Unit Code (Unchanged) ---
                 TextFormField(
                   controller: _unitCodeController,
                   decoration: _inputDecoration(
@@ -371,7 +381,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                       return 'Unit code is required';
                     }
                     final trimmedValue = value.trim();
-                    final RegExp unitCodeFormat = RegExp(r'^[A-Z]+ \d+$');
+                    final RegExp unitCodeFormat = RegExp(r'^[A-Z]{2,4} \d{3,}$');
                     if (!unitCodeFormat.hasMatch(trimmedValue)) {
                       return 'Format must be like "COM 123"';
                     }
@@ -379,8 +389,9 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   },
                 ),
                 const SizedBox(height: 15),
+                // --- End Unit Name & Code ---
 
-                // --- Date/Time Pickers (Unchanged) ---
+                // --- Date/Time Pickers ---
                 Text("Lecture Schedule *", style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 InkWell(
@@ -430,37 +441,38 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                    ],
                  ),
                  const SizedBox(height: 12),
+                 // --- End Date/Time Pickers ---
 
-                // Venue Dropdown (Unchanged)
+                // --- Venue Dropdown ---
                 DropdownButtonFormField<String>(
                   decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
                   value: _selectedVenue,
-                  // Assuming venuesList comes from dropdown_data.dart
                   items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
                   onChanged: (val) => setState(() => _selectedVenue = val),
                   validator: (value) => value == null ? 'Venue is required' : null,
                   isExpanded: true,
                 ),
+                // --- End Venue Dropdown ---
               ],
             ),
           ),
         ),
       ),
-      // Dialog Actions (Unchanged)
+      // --- Dialog Actions ---
       actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       actions: <Widget>[
         TextButton(
-          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false), // Cancel
           child: const Text('Cancel'),
         ),
         ElevatedButton.icon(
           icon: _isLoading
-              ? Container()
+              ? Container() // Hide icon when loading
               : const Icon(Icons.check_circle_outline, size: 20),
           label: _isLoading
               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('Create Lecture'),
-          onPressed: _isLoading ? null : _submitForm,
+          onPressed: _isLoading ? null : _submitForm, // Submit
           style: ElevatedButton.styleFrom(
             backgroundColor: CreateLectureDialog.brandColor,
             foregroundColor: Colors.white,
@@ -469,6 +481,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
           ),
         ),
       ],
+      // --- End Dialog Actions ---
     );
   }
 }

@@ -43,7 +43,7 @@ const parseDateForFirestore = (dateInput) => {
       console.warn(`Invalid date input received: ${dateInput}`);
       return null;
     }
-    return date; // Firestore Admin SDK handles JS Date objects
+    return date;
   } catch (e) {
     console.error(`Error parsing date input "${dateInput}":`, e);
     return null;
@@ -59,7 +59,6 @@ const formatTimestampForClient = (timestamp) => {
   if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
     return timestamp.toISOString();
   }
-  // Handle case where it might already be an ISO string (e.g., from previous processing)
   if (typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp)) {
      return timestamp;
   }
@@ -72,10 +71,9 @@ const formatDateTimeForSMS = (dateObj) => {
     if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
         return "Invalid Date";
     }
-    return dateObj.toLocaleString('en-KE', { // Use appropriate locale
+    return dateObj.toLocaleString('en-KE', {
         weekday: 'short', month: 'short', day: 'numeric',
         hour: 'numeric', minute: '2-digit', hour12: true,
-        // timeZone: 'Africa/Nairobi' // Optional: Specify timezone if needed
     });
 };
 
@@ -84,13 +82,13 @@ const formatStringForQuery = (str) => {
     if (str && typeof str === 'string') {
         return str.trim().toUpperCase();
     }
-    return str; // Return original if not a string or null/undefined
+    return str;
 };
 
 
 // --- Create a Lecture (with SMS Notification) ---
 router.post('/', checkAuth, async (req, res) => {
-  let createdLectureId = null; // Define here for broader scope in error handling
+  let createdLectureId = null;
 
   try {
     // --- Authentication & Authorization ---
@@ -100,11 +98,10 @@ router.post('/', checkAuth, async (req, res) => {
     }
     const authUserId = req.userData.userId;
     const authUserEmail = req.userData.email;
-    const isBypassUser = authUserEmail === 'muhambe@au.ac.ke'; // Consider making this configurable
+    const isBypassUser = authUserEmail === 'muhambe@au.ac.ke';
     let userData = null;
     let userDoc = null;
 
-    // Authorization Check (Lecturer role or bypass user)
     if (!isBypassUser) {
         userDoc = await db.collection(USERS_COLLECTION).doc(authUserId).get();
         if (!userDoc.exists) {
@@ -158,19 +155,17 @@ router.post('/', checkAuth, async (req, res) => {
     // --- End Validation ---
 
     // --- Prepare Lecture Data for Firestore ---
-    // Use helper for consistent formatting
     const newLectureData = {
       lecturerId: authUserId,
       lecturerName: userData.name || 'N/A',
       lecturerPhone: lecturerPhone || userData.phoneNumber || null,
-      // Store consistently (e.g., uppercase)
       school: formatStringForQuery(school),
       department: formatStringForQuery(department),
       course: formatStringForQuery(course),
-      yearOfStudy: formatStringForQuery(yearOfStudy), // Ensure consistency with how student profile stores it
-      semester: formatStringForQuery(semester),     // Ensure consistency with how student profile stores it
-      unitName: unitName.trim(), // Unit name might preserve case
-      unitCode: unitCode.trim().toUpperCase(), // Unit code often uppercase
+      yearOfStudy: formatStringForQuery(yearOfStudy),
+      semester: formatStringForQuery(semester),
+      unitName: unitName.trim(),
+      unitCode: unitCode.trim().toUpperCase(),
       lectureDate: parsedLectureDate,
       startTime: parsedStartTime,
       endTime: parsedEndTime,
@@ -181,46 +176,35 @@ router.post('/', checkAuth, async (req, res) => {
 
     // --- 1. Add the lecture document to Firestore ---
     const docRef = await db.collection(LECTURES_COLLECTION).add(newLectureData);
-    createdLectureId = docRef.id; // Assign ID here
+    createdLectureId = docRef.id;
     console.log(`Lecture created successfully with ID: ${createdLectureId} by user ${authUserEmail}`);
 
     const createdDoc = await docRef.get();
     const createdData = createdDoc.data();
     if (!createdData) {
         console.error(`Critical Error: Failed to fetch created lecture data for ID: ${createdLectureId}`);
-        // Don't stop execution, but SMS might fail or be inaccurate
     }
 
-    // --- 2. Prepare and Send SMS Notifications ---
+    // --- 2. Prepare and Send SMS Notifications (for CREATE) ---
+    // This block remains largely the same as before
     if (twilioClient && createdData) {
-        console.log(`Preparing to send SMS notifications for lecture ${createdLectureId}...`);
-        console.log('--- Querying Students With Criteria (Using formatted values) ---');
-        console.log(`Role:        'student'`);
-        console.log(`School:      '${createdData.school}'`); // Value used in query
-        console.log(`Department:  '${createdData.department}'`); // Value used in query
-        console.log(`Course:      '${createdData.course}'`); // Value used in query
-        console.log(`YearOfStudy: '${createdData.yearOfStudy}'`); // Value used in query
-        console.log(`Semester:    '${createdData.semester}'`); // Value used in query
-        console.log(`IsVerified:  true`);
-        console.log('------------------------------------');
-
-        // Query needs to match how data is stored (e.g., uppercase if stored uppercase)
-        // Ensure the fields in the user profile are also stored consistently (e.g., uppercase)
+        console.log(`Preparing to send CREATE SMS notifications for lecture ${createdLectureId}...`);
+        // (Keep the existing student query and SMS sending logic here)
         const studentsQuery = db.collection(USERS_COLLECTION)
             .where('role', '==', 'student')
-            .where('school', '==', createdData.school) // Assumes user profile also stores uppercase
-            .where('department', '==', createdData.department) // Assumes user profile also stores uppercase
-            .where('course', '==', createdData.course) // Assumes user profile also stores uppercase
-            .where('yearOfStudy', '==', createdData.yearOfStudy) // Assumes user profile also stores uppercase
-            .where('semester', '==', createdData.semester) // Assumes user profile also stores uppercase
+            .where('school', '==', createdData.school)
+            .where('department', '==', createdData.department)
+            .where('course', '==', createdData.course)
+            .where('yearOfStudy', '==', createdData.yearOfStudy)
+            .where('semester', '==', createdData.semester)
             .where('isVerified', '==', true);
 
         try {
             const studentsSnapshot = await studentsQuery.get();
             if (studentsSnapshot.empty) {
-                console.log(`QUERY RESULT: No matching students found for lecture ${createdLectureId}. No SMS sent.`);
+                console.log(`CREATE SMS: No matching students found for lecture ${createdLectureId}.`);
             } else {
-                console.log(`QUERY RESULT: Found ${studentsSnapshot.size} potential student(s) for notification.`);
+                console.log(`CREATE SMS: Found ${studentsSnapshot.size} potential student(s) for notification.`);
                 const smsStartTime = formatDateTimeForSMS(createdData.startTime.toDate());
                 const smsMessageBody = `${smsSenderName} Alert: New lecture for ${createdData.unitName} (${createdData.unitCode}) by ${createdData.lecturerName} on ${smsStartTime} at ${createdData.venue}.`;
                 const smsPromises = [];
@@ -229,10 +213,7 @@ router.post('/', checkAuth, async (req, res) => {
                     const studentData = studentDoc.data();
                     const studentId = studentDoc.id;
                     const studentPhoneNumber = studentData.phoneNumber;
-
-                    console.log(`Processing student ${studentId}: Phone='${studentPhoneNumber}', Verified='${studentData.isVerified}', Role='${studentData.role}'`);
                     if (studentPhoneNumber && typeof studentPhoneNumber === 'string' && studentPhoneNumber.startsWith('+') && studentPhoneNumber.length > 10) {
-                        console.log(`Queueing SMS to student ${studentId} at ${studentPhoneNumber}`);
                         smsPromises.push(
                             twilioClient.messages.create({
                                 body: smsMessageBody,
@@ -243,42 +224,40 @@ router.post('/', checkAuth, async (req, res) => {
                             .catch(error => ({ status: 'rejected', error: error.message, phone: studentPhoneNumber, code: error.code }))
                         );
                     } else {
-                        console.warn(`Skipping SMS for student ${studentId}: Invalid or missing phone number ('${studentPhoneNumber}')`);
+                        console.warn(`CREATE SMS: Skipping student ${studentId}: Invalid phone ('${studentPhoneNumber}')`);
                     }
                 });
 
                 if (smsPromises.length > 0) {
-                    console.log(`Attempting to send ${smsPromises.length} SMS messages...`);
+                    console.log(`CREATE SMS: Attempting to send ${smsPromises.length} messages...`);
                     const results = await Promise.allSettled(smsPromises);
                     const successfulSends = results.filter(r => r.status === 'fulfilled').length;
                     const failedSends = results.filter(r => r.status === 'rejected').length;
-                    console.log(`SMS sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
+                    console.log(`CREATE SMS: Sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
                     results.filter(r => r.status === 'rejected').forEach(failure => {
-                         console.warn(` -> Failed SMS Detail: Phone: ${failure.reason.phone}, Code: ${failure.reason.code || 'N/A'}, Error: ${failure.reason.error}`);
+                         console.warn(` -> CREATE SMS Failed Detail: Phone: ${failure.reason.phone}, Code: ${failure.reason.code || 'N/A'}, Error: ${failure.reason.error}`);
                     });
                 } else {
-                     console.log("No valid student phone numbers found among the matched students.");
+                     console.log("CREATE SMS: No valid student phone numbers found.");
                 }
             }
         } catch (queryError) {
-            console.error(`Error querying students or sending SMS for lecture ${createdLectureId}:`, queryError);
-            // Check for index errors during student query
+            console.error(`CREATE SMS: Error querying students or sending SMS for lecture ${createdLectureId}:`, queryError);
              if (queryError.code === 'failed-precondition' || (queryError.message && queryError.message.includes('index'))) {
-                 console.error("Firestore Index Missing for Student Query: The query to find students requires a composite index. Check the error details for a link to create it in the Firebase console.");
+                 console.error("CREATE SMS: Firestore Index Missing for Student Query.");
              }
         }
     } else if (!twilioClient) {
-        console.warn(`Twilio client not initialized. Skipping SMS notifications for lecture ${createdLectureId}.`);
+        console.warn(`Twilio client not initialized. Skipping CREATE SMS notifications for lecture ${createdLectureId}.`);
     } else if (!createdData) {
-         console.warn(`Created lecture data was unavailable. Skipping SMS notifications for lecture ${createdLectureId}.`);
+         console.warn(`Created lecture data was unavailable. Skipping CREATE SMS notifications for lecture ${createdLectureId}.`);
     }
-    // --- End SMS Logic ---
+    // --- End SMS Logic for CREATE ---
 
     // --- 3. Return the success response to the client ---
     const responseData = createdData ? {
         id: createdDoc.id,
         ...createdData,
-        // Ensure timestamps are formatted correctly for the client
         lectureDate: formatTimestampForClient(createdData.lectureDate),
         startTime: formatTimestampForClient(createdData.startTime),
         endTime: formatTimestampForClient(createdData.endTime),
@@ -290,11 +269,8 @@ router.post('/', checkAuth, async (req, res) => {
   } catch (error) {
     console.error(`Error processing POST /lectures request (Lecture ID if created: ${createdLectureId || 'N/A'}):`, error);
     console.error('Error Stack:', error.stack);
-    let errorMessage = 'Internal Server Error: Failed to create lecture or process notifications';
-    let statusCode = 500;
-    // Add more specific error handling if needed
-    res.status(statusCode).json({
-        error: errorMessage,
+    res.status(500).json({
+        error: 'Internal Server Error: Failed to create lecture or process notifications',
         details: process.env.NODE_ENV !== 'production' ? error.message : undefined
     });
   }
@@ -306,7 +282,6 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
         const requestedLecturerId = req.params.lecturerId;
         const authUserId = req.userData.userId;
 
-        // Authorization: Ensure the authenticated user is requesting their own lectures
         if (requestedLecturerId !== authUserId) {
             console.log(`Forbidden attempt: User ${authUserId} tried to access lectures for ${requestedLecturerId}`);
             return res.status(403).json({ error: 'Forbidden: You can only access your own lectures.' });
@@ -314,24 +289,21 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
 
         console.log(`Fetching lectures for lecturerId: ${requestedLecturerId}`);
         const lecturesRef = db.collection(LECTURES_COLLECTION);
-        // Query for lectures created by this lecturer
         const snapshot = await lecturesRef
             .where('lecturerId', '==', requestedLecturerId)
-            .orderBy('startTime', 'desc') // Order by start time, descending (most recent first)
+            .orderBy('startTime', 'desc')
             .get();
 
         if (snapshot.empty) {
             console.log(`No lectures found for lecturer ${requestedLecturerId}`);
-            return res.json([]); // Return empty array if no lectures found
+            return res.json([]);
         }
 
-        // Map Firestore documents to lecture objects for the response
         const lectures = snapshot.docs.map(doc => {
             const data = doc.data();
             return {
                 id: doc.id,
                 ...data,
-                // Format timestamps for client consistency
                 lectureDate: formatTimestampForClient(data.lectureDate),
                 startTime: formatTimestampForClient(data.startTime),
                 endTime: formatTimestampForClient(data.endTime),
@@ -350,50 +322,41 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
     }
 });
 
-// --- Get lectures for a student (based on student's profile AND query filters) ---
+// --- Get lectures for a student ---
 router.get('/student', checkAuth, async (req, res) => {
   try {
     const studentUserId = req.userData.userId;
 
-    // 1. Get Student Profile Data
     const studentDoc = await db.collection(USERS_COLLECTION).doc(studentUserId).get();
     if (!studentDoc.exists) {
         console.error(`Student profile not found for authenticated user ID: ${studentUserId}`);
         return res.status(404).json({ error: 'Your user profile could not be found.' });
     }
     const studentData = studentDoc.data();
-    // Use helper to ensure consistent formatting for comparison
     const profileSchool = formatStringForQuery(studentData.school);
     const profileDepartment = formatStringForQuery(studentData.department);
     const profileCourse = formatStringForQuery(studentData.course);
-    // Note: yearOfStudy and semester from profile are NOT used for filtering lectures directly,
-    // only for the percentage calculation. The filters come from req.query.
     const profileRole = studentData.role;
     const profileIsVerified = studentData.isVerified;
 
-    // 2. Validate Student Role and Profile Fields Needed for Base Filtering
     if (profileRole !== 'student') {
          console.error(`User ${studentUserId} is not a student (role: ${profileRole}). Cannot fetch student lectures.`);
          return res.status(403).json({ error: 'Forbidden: Only students can access this lecture list.' });
     }
-    if (!profileSchool || !profileDepartment || !profileCourse) { // Base fields needed for any query
-        console.error(`Validation Error: Student ${studentUserId} profile is missing required fields (school, dept, course). Profile values: School=${profileSchool}, Dept=${profileDepartment}, Course=${profileCourse}`);
+    if (!profileSchool || !profileDepartment || !profileCourse) {
+        console.error(`Validation Error: Student ${studentUserId} profile is missing required fields (school, dept, course).`);
         return res.status(400).json({ error: 'Your profile is missing required details (school, department, course) needed to find lectures.' });
     }
      if (!profileIsVerified) {
          console.warn(`Student ${studentUserId} is not verified. They may not see all lectures.`);
-         // Decide if unverified students should see lectures - currently allowing but warning.
     }
 
-    // 3. Get and Validate Query Parameters (Year and Semester for filtering)
     const { school: requestedSchool, department: requestedDepartment, course: requestedCourse, year: requestedYear, semester: requestedSemester } = req.query;
     if (!requestedSchool || !requestedDepartment || !requestedCourse || !requestedYear || !requestedSemester) {
-        console.error(`Validation Error: Missing required query parameters (school, dept, course, year, semester) for student ${studentUserId}. Received: school=${requestedSchool}, dept=${requestedDepartment}, course=${requestedCourse}, year=${requestedYear}, semester=${requestedSemester}`);
+        console.error(`Validation Error: Missing required query parameters (school, dept, course, year, semester) for student ${studentUserId}.`);
         return res.status(400).json({ error: 'Required filter parameters (school, department, course, year, semester) were not provided in the request.' });
     }
 
-    // 4. Security Check & Data Consistency Check: Ensure requested school/dept/course match student's profile
-    //    Compare consistently (e.g., uppercase)
     const querySchool = formatStringForQuery(requestedSchool);
     const queryDepartment = formatStringForQuery(requestedDepartment);
     const queryCourse = formatStringForQuery(requestedCourse);
@@ -403,48 +366,35 @@ router.get('/student', checkAuth, async (req, res) => {
         return res.status(403).json({ error: 'Forbidden: You can only filter lectures for your registered school, department, and course.' });
     }
 
-    // 5. Build Firestore Query
-    // Use consistent values for querying (e.g., uppercase)
-    const queryYear = formatStringForQuery(requestedYear); // Use the requested year filter
-    const querySemester = formatStringForQuery(requestedSemester); // Use the requested semester filter
+    const queryYear = formatStringForQuery(requestedYear);
+    const querySemester = formatStringForQuery(requestedSemester);
 
     console.log(`Firestore Query Parameters for student ${studentUserId}:`);
-    console.log(`  school:      '${querySchool}'`);
-    console.log(`  department:  '${queryDepartment}'`);
-    console.log(`  course:      '${queryCourse}'`);
-    console.log(`  yearOfStudy: '${queryYear}'`);
-    console.log(`  semester:    '${querySemester}'`);
+    console.log(`  school: '${querySchool}', department: '${queryDepartment}', course: '${queryCourse}', yearOfStudy: '${queryYear}', semester: '${querySemester}'`);
 
     const lecturesRef = db.collection(LECTURES_COLLECTION);
-    let query = lecturesRef;
+    let query = lecturesRef
+        .where('school', '==', querySchool)
+        .where('department', '==', queryDepartment)
+        .where('course', '==', queryCourse)
+        .where('yearOfStudy', '==', queryYear)
+        .where('semester', '==', querySemester);
 
-    // Filter by student's base profile AND the requested year/semester
-    // Ensure the fields in the 'where' clauses EXACTLY match the field names in your Firestore 'lectures' collection
-    // AND that the data was stored consistently (e.g., uppercase)
-    query = query.where('school', '==', querySchool);
-    query = query.where('department', '==', queryDepartment);
-    query = query.where('course', '==', queryCourse);
-    query = query.where('yearOfStudy', '==', queryYear); // Compare lecture's yearOfStudy with the requested year
-    query = query.where('semester', '==', querySemester); // Compare lecture's semester with the requested semester
-
-    // Filter for upcoming lectures (lectures starting from the beginning of today onwards)
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today
-    query = query.where('startTime', '>=', today); // Only lectures starting today or later
-    console.log(`  startTime:   >= ${today.toISOString()}`);
+    today.setHours(0, 0, 0, 0);
+    query = query.where('startTime', '>=', today);
+    console.log(`  startTime: >= ${today.toISOString()}`);
 
-    // Order results by start time ascending
-    query = query.orderBy('startTime', 'asc'); // Show earliest upcoming first
-    console.log(`  orderBy:     startTime asc`);
+    query = query.orderBy('startTime', 'asc');
+    console.log(`  orderBy: startTime asc`);
 
-    // 6. Execute Query and Process Results
     console.log("Executing Firestore query...");
     const snapshot = await query.get();
     console.log(`Firestore query executed. Found ${snapshot.size} documents.`);
 
     if (snapshot.empty) {
         console.log(`No upcoming student lectures found for student ${studentUserId} with the specified filters.`);
-        return res.json([]); // Return empty array, not an error
+        return res.json([]);
     }
 
     const lectures = snapshot.docs.map(doc => {
@@ -452,7 +402,6 @@ router.get('/student', checkAuth, async (req, res) => {
         return {
             id: doc.id,
             ...data,
-            // Format timestamps for client consistency
             lectureDate: formatTimestampForClient(data.lectureDate),
             startTime: formatTimestampForClient(data.startTime),
             endTime: formatTimestampForClient(data.endTime),
@@ -465,11 +414,10 @@ router.get('/student', checkAuth, async (req, res) => {
 
   } catch (error) {
     console.error(`Error getting student lectures for user ${req.userData?.userId}:`, error);
-    console.error('Error Stack:', error.stack); // Log stack trace for detailed debugging
+    console.error('Error Stack:', error.stack);
 
-    // Check specifically for Firestore index errors
     if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
-        console.error("Firestore Index Missing: The query requires an index. Check the error details for a link to create it in the Firebase console. Index likely needs fields: school (ASC), department (ASC), course (ASC), yearOfStudy (ASC), semester (ASC), startTime (ASC)");
+        console.error("Firestore Index Missing: The query requires an index. Check the error details for a link to create it in the Firebase console.");
         return res.status(500).json({
             error: 'Internal Server Error: Failed to get student lectures due to missing database index.',
             details: 'A required Firestore index is missing. Please check backend logs or Firebase console for a creation link.'
@@ -486,7 +434,6 @@ router.get('/student', checkAuth, async (req, res) => {
 
 // --- Get all lectures (Admin Only) ---
 router.get('/', checkAuth, async (req, res) => {
-  // Authorization Check: Ensure user has 'admin' role
   try {
     const userDoc = await db.collection(USERS_COLLECTION).doc(req.userData.userId).get();
     if (!userDoc.exists || userDoc.data().role !== 'admin') {
@@ -499,7 +446,6 @@ router.get('/', checkAuth, async (req, res) => {
       return res.status(500).json({ error: 'Internal Server Error during authorization check.' });
   }
 
-  // Fetch all lectures if authorized
   try {
     console.log('Fetching all lectures (admin access)');
     const snapshot = await db.collection(LECTURES_COLLECTION).orderBy('startTime', 'desc').get();
@@ -556,6 +502,201 @@ router.get('/:lectureId', checkAuth, async (req, res) => {
   }
 });
 
+// --- Update Lecture (PUT /:lectureId) ---
+router.put('/:lectureId', checkAuth, async (req, res) => {
+    const lectureId = req.params.lectureId;
+    const authenticatedUserId = req.userData.userId;
+    const updateData = req.body; // Data sent from Flutter
+
+    if (!lectureId) {
+        console.log('Update request failed: Missing lectureId parameter.');
+        return res.status(400).json({ message: 'Lecture ID is required.' });
+    }
+
+    console.log(`Attempting to update lecture ${lectureId} by user ${authenticatedUserId}`);
+
+    try {
+        const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
+        const lectureDoc = await lectureRef.get();
+
+        if (!lectureDoc.exists) {
+            console.log(`Update failed: Lecture ${lectureId} not found.`);
+            return res.status(404).json({ message: 'Lecture not found.' });
+        }
+
+        const lectureData = lectureDoc.data(); // Original lecture data
+
+        // --- AUTHORIZATION CHECK ---
+        const userRoleDoc = await db.collection(USERS_COLLECTION).doc(authenticatedUserId).get();
+        const userRole = userRoleDoc.exists ? userRoleDoc.data().role : null;
+        const isAdmin = userRole === 'admin';
+
+        if (lectureData.lecturerId !== authenticatedUserId && !isAdmin) {
+            console.warn(`Unauthorized update attempt: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}) tried to update lecture ${lectureId} owned by ${lectureData.lecturerId}`);
+            return res.status(403).json({ message: 'Forbidden: You do not have permission to update this lecture.' });
+        }
+        console.log(`Authorization successful for update: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}) updating lecture ${lectureId}.`);
+        // --- END AUTHORIZATION CHECK ---
+
+        // --- VALIDATE AND PREPARE UPDATE DATA ---
+        const allowedUpdates = {};
+        const editableFields = ['unitName', 'unitCode', 'venue', 'yearOfStudy', 'semester', 'lectureDate', 'startTime', 'endTime'];
+
+        for (const field of editableFields) {
+            if (updateData.hasOwnProperty(field)) {
+                if (field === 'lectureDate' || field === 'startTime' || field === 'endTime') {
+                    const parsedDate = parseDateForFirestore(updateData[field]);
+                    if (!parsedDate && updateData[field] != null) {
+                         console.error(`Validation Error during update: Invalid date format for ${field}: ${updateData[field]}`);
+                         return res.status(400).json({ error: `Invalid date format provided for ${field}. Expected YYYY-MM-DD or ISO string.` });
+                    }
+                    allowedUpdates[field] = parsedDate;
+                }
+                else if (['unitCode', 'yearOfStudy', 'semester'].includes(field)) {
+                     allowedUpdates[field] = formatStringForQuery(updateData[field]);
+                }
+                else if (typeof updateData[field] === 'string') {
+                    allowedUpdates[field] = updateData[field].trim();
+                }
+                 else {
+                     allowedUpdates[field] = updateData[field];
+                 }
+            }
+        }
+
+        const finalStartTime = allowedUpdates.hasOwnProperty('startTime') ? allowedUpdates.startTime : lectureData.startTime?.toDate();
+        const finalEndTime = allowedUpdates.hasOwnProperty('endTime') ? allowedUpdates.endTime : lectureData.endTime?.toDate();
+
+        if (finalStartTime && finalEndTime && finalEndTime <= finalStartTime) {
+             console.error('Validation Error during update: End time must be after start time.');
+             return res.status(400).json({ error: 'End time must be after start time.' });
+        }
+        // --- END VALIDATION ---
+
+        // --- Perform Update in Firestore ---
+        if (Object.keys(allowedUpdates).length > 0) {
+            await lectureRef.update(allowedUpdates);
+            console.log(`Lecture ${lectureId} updated successfully with fields:`, Object.keys(allowedUpdates));
+        } else {
+            console.log(`No valid fields provided for update on lecture ${lectureId}.`);
+        }
+        // --- End Firestore Update ---
+
+        // --- Fetch Updated Data ---
+        const updatedDoc = await lectureRef.get();
+        const updatedLecture = updatedDoc.data(); // contains the merged updated data
+        if (!updatedLecture) {
+             console.error(`Critical Error: Failed to fetch updated lecture data after update for ID: ${lectureId}`);
+             // Proceed to send response, but SMS might fail
+        }
+        // --- End Fetch Updated Data ---
+
+
+        // --- *** Prepare and Send SMS Notifications (for UPDATE) *** ---
+        if (twilioClient && updatedLecture) {
+            console.log(`Preparing to send UPDATE SMS notifications for lecture ${lectureId}...`);
+            // Use the UPDATED lecture details for querying students
+            console.log('--- Querying Students With Criteria (Using UPDATED values) ---');
+            console.log(`Role:        'student'`);
+            console.log(`School:      '${updatedLecture.school}'`);
+            console.log(`Department:  '${updatedLecture.department}'`);
+            console.log(`Course:      '${updatedLecture.course}'`);
+            console.log(`YearOfStudy: '${updatedLecture.yearOfStudy}'`);
+            console.log(`Semester:    '${updatedLecture.semester}'`);
+            console.log(`IsVerified:  true`);
+            console.log('------------------------------------');
+
+            const studentsQuery = db.collection(USERS_COLLECTION)
+                .where('role', '==', 'student')
+                .where('school', '==', updatedLecture.school)
+                .where('department', '==', updatedLecture.department)
+                .where('course', '==', updatedLecture.course)
+                .where('yearOfStudy', '==', updatedLecture.yearOfStudy)
+                .where('semester', '==', updatedLecture.semester)
+                .where('isVerified', '==', true);
+
+            // Separate try-catch for SMS sending to avoid failing the main update response
+            try {
+                const studentsSnapshot = await studentsQuery.get();
+                if (studentsSnapshot.empty) {
+                    console.log(`UPDATE SMS: No matching students found for lecture ${lectureId}.`);
+                } else {
+                    console.log(`UPDATE SMS: Found ${studentsSnapshot.size} potential student(s) for notification.`);
+                    // Format the UPDATED start time for the SMS
+                    const smsStartTime = formatDateTimeForSMS(updatedLecture.startTime.toDate());
+                    // Craft a message indicating an UPDATE
+                    const smsMessageBody = `${smsSenderName} Update: Lecture for ${updatedLecture.unitName} (${updatedLecture.unitCode}) by ${updatedLecture.lecturerName} is now scheduled for ${smsStartTime} at ${updatedLecture.venue}.`;
+                    const smsPromises = [];
+
+                    studentsSnapshot.forEach(studentDoc => {
+                        const studentData = studentDoc.data();
+                        const studentId = studentDoc.id;
+                        const studentPhoneNumber = studentData.phoneNumber;
+                        if (studentPhoneNumber && typeof studentPhoneNumber === 'string' && studentPhoneNumber.startsWith('+') && studentPhoneNumber.length > 10) {
+                            smsPromises.push(
+                                twilioClient.messages.create({
+                                    body: smsMessageBody,
+                                    messagingServiceSid: messagingServiceSid,
+                                    to: studentPhoneNumber
+                                })
+                                .then(message => ({ status: 'fulfilled', sid: message.sid, phone: studentPhoneNumber }))
+                                .catch(error => ({ status: 'rejected', error: error.message, phone: studentPhoneNumber, code: error.code }))
+                            );
+                        } else {
+                            console.warn(`UPDATE SMS: Skipping student ${studentId}: Invalid phone ('${studentPhoneNumber}')`);
+                        }
+                    });
+
+                    if (smsPromises.length > 0) {
+                        console.log(`UPDATE SMS: Attempting to send ${smsPromises.length} messages...`);
+                        const results = await Promise.allSettled(smsPromises);
+                        const successfulSends = results.filter(r => r.status === 'fulfilled').length;
+                        const failedSends = results.filter(r => r.status === 'rejected').length;
+                        console.log(`UPDATE SMS: Sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
+                        results.filter(r => r.status === 'rejected').forEach(failure => {
+                             console.warn(` -> UPDATE SMS Failed Detail: Phone: ${failure.reason.phone}, Code: ${failure.reason.code || 'N/A'}, Error: ${failure.reason.error}`);
+                        });
+                    } else {
+                         console.log("UPDATE SMS: No valid student phone numbers found.");
+                    }
+                }
+            } catch (smsQueryError) {
+                console.error(`UPDATE SMS: Error querying students or sending SMS for lecture ${lectureId}:`, smsQueryError);
+                 if (smsQueryError.code === 'failed-precondition' || (smsQueryError.message && smsQueryError.message.includes('index'))) {
+                     console.error("UPDATE SMS: Firestore Index Missing for Student Query.");
+                 }
+                 // Log the error but DO NOT fail the main PUT response
+            }
+        } else if (!twilioClient) {
+            console.warn(`Twilio client not initialized. Skipping UPDATE SMS notifications for lecture ${lectureId}.`);
+        } else if (!updatedLecture) {
+             console.warn(`Updated lecture data was unavailable. Skipping UPDATE SMS notifications for lecture ${lectureId}.`);
+        }
+        // --- *** END SMS Logic for UPDATE *** ---
+
+
+        // --- Return Success Response ---
+        // Send back the final state of the lecture data
+        res.status(200).json({
+            id: updatedDoc.id,
+            ...(updatedLecture || {}), // Send empty object if fetch failed
+            // Format timestamps for client consistency
+            lectureDate: formatTimestampForClient(updatedLecture?.lectureDate),
+            startTime: formatTimestampForClient(updatedLecture?.startTime),
+            endTime: formatTimestampForClient(updatedLecture?.endTime),
+            createdAt: formatTimestampForClient(updatedLecture?.createdAt),
+        });
+
+    } catch (error) {
+        console.error(`Error updating lecture ${lectureId}:`, error);
+        console.error('Error Stack:', error.stack);
+        res.status(500).json({
+            message: 'Internal server error while updating lecture.',
+            details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+        });
+    }
+});
+
 
 // --- Delete Lecture and Associated Attendance ---
 router.delete('/:lectureId', checkAuth, async (req, res) => {
@@ -581,10 +722,9 @@ router.delete('/:lectureId', checkAuth, async (req, res) => {
         const lectureData = lectureDoc.data();
 
         // --- AUTHORIZATION CHECK ---
-        // Allow deletion if user is the lecturer OR if user is an admin (assuming admin role exists)
         const userRoleDoc = await db.collection(USERS_COLLECTION).doc(authenticatedUserId).get();
         const userRole = userRoleDoc.exists ? userRoleDoc.data().role : null;
-        const isAdmin = userRole === 'admin'; // Check if user is admin
+        const isAdmin = userRole === 'admin';
 
         if (lectureData.lecturerId !== authenticatedUserId && !isAdmin) {
             console.warn(`Unauthorized delete attempt: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}) tried to delete lecture ${lectureId} owned by ${lectureData.lecturerId}`);
@@ -598,8 +738,6 @@ router.delete('/:lectureId', checkAuth, async (req, res) => {
         batch.delete(lectureRef);
         console.log(`Scheduled deletion for lecture document: ${lectureId}`);
 
-        // Find and schedule deletion for associated attendance records
-        // This query requires an index on lectureId in the attendance collection
         const attendanceQuery = db.collection(ATTENDANCE_COLLECTION).where('lectureId', '==', lectureId);
         const attendanceSnapshot = await attendanceQuery.get();
 
@@ -619,7 +757,6 @@ router.delete('/:lectureId', checkAuth, async (req, res) => {
     } catch (error) {
         console.error(`Error deleting lecture ${lectureId}:`, error);
         console.error('Error Stack:', error.stack);
-        // Check specifically for Firestore index errors if attendance query fails
         if (error.code === 'failed-precondition' || (error.message && error.message.includes('index'))) {
              console.error("Firestore Index Missing for Deletion: The query to find attendance records requires an index on 'lectureId'. Check the error details for a link to create it.");
         }
