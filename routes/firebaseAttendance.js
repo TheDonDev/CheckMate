@@ -67,13 +67,14 @@ router.post('/join/:lectureId', checkAuth, async (req, res) => {
     }
     const studentName = studentData.name || 'N/A';
 
-    // --- Optional: Validate if student's profile matches lecture criteria ---
+    // --- Validate if student's profile matches lecture criteria ---
+    // Ensure case-insensitive or consistent case comparison if needed
     if (studentData.school !== lectureData.school ||
         studentData.department !== lectureData.department ||
         studentData.course !== lectureData.course ||
         studentData.yearOfStudy !== lectureData.yearOfStudy ||
         studentData.semester !== lectureData.semester) {
-        console.error(`Join attempt BLOCKED: Student ${studentUserId} profile details do not match lecture ${lectureId} criteria.`);
+        console.error(`Join attempt BLOCKED: Student ${studentUserId} profile details (Sch: ${studentData.school}, Dept: ${studentData.department}, Crs: ${studentData.course}, Yr: ${studentData.yearOfStudy}, Sem: ${studentData.semester}) do not match lecture ${lectureId} criteria (Sch: ${lectureData.school}, Dept: ${lectureData.department}, Crs: ${lectureData.course}, Yr: ${lectureData.yearOfStudy}, Sem: ${lectureData.semester}).`);
         return res.status(403).json({ message: 'Your profile details (School/Dept/Course/Year/Semester) do not match this lecture.' });
     }
 
@@ -354,8 +355,9 @@ router.post('/checkin', checkAuth, async (req, res) => {
 });
 
 
-// --- Student views their attendance history ---
-// Endpoint: GET /api/firebase/attendance/student/:userId
+// --- Student views their attendance history & summary ---
+// Endpoint: GET /api/firebase/attendance/student/:userId?year=YYYY&semester=SEMESTER_NAME
+// *** MODIFIED TO ACCEPT year & semester QUERY PARAMETERS FOR FILTERING ***
 router.get('/student/:userId', checkAuth, async (req, res) => {
   try {
     const requestedUserId = req.params.userId;
@@ -367,71 +369,117 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
         return res.status(403).json({ message: 'Forbidden: You can only access your own attendance records.' });
     }
 
-    // --- Fetch Attendance Records for the student ---
-    const attendanceRef = db.collection(ATTENDANCE_COLLECTION);
-    const snapshot = await attendanceRef.where('userId', '==', requestedUserId).orderBy('joinedAt', 'desc').get();
+    // --- Get Year/Semester Filters from Query Params ---
+    const queryYear = req.query.year;
+    const querySemester = req.query.semester;
+    console.log(`Fetching attendance summary for user ${requestedUserId}. Filters - Year: ${queryYear || 'None'}, Semester: ${querySemester || 'None'}`);
 
-    const attendanceRecords = [];
-    snapshot.forEach((doc) => {
-      const data = doc.data();
-      attendanceRecords.push({
-          id: doc.id,
-          ...data,
-          checkInTime: formatTimestamp(data.checkInTime),
-          joinedAt: formatTimestamp(data.joinedAt),
-          checkedIn: data.checkedIn === true, // Ensure boolean
-       });
-    });
-
-    // --- Percentage Calculation ---
+    // --- Initialize Summary Variables ---
     let percentage = 0;
     let totalRelevantLectures = 0;
-    let attendedLecturesCount = attendanceRecords.filter((record) => record.checkedIn === true).length;
+    let attendedLecturesCount = 0;
+    let relevantLectureIds = [];
+    let filteredAttendanceRecords = []; // Store records filtered by year/semester
 
-    try {
-        // Fetch user profile to get criteria for finding relevant lectures
-        const userDoc = await db.collection(USERS_COLLECTION).doc(requestedUserId).get();
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            const { school, department, course, yearOfStudy, semester } = userData;
-
-            if (school && department && course && yearOfStudy && semester) {
-                const lecturesRef = db.collection(LECTURES_COLLECTION);
-                let lecturesQuery = lecturesRef
-                    .where('school', '==', school)
-                    .where('department', '==', department)
-                    .where('course', '==', course)
-                    .where('yearOfStudy', '==', yearOfStudy)
-                    .where('semester', '==', semester);
-                // Optional: Only count lectures that have already started/passed?
-                // lecturesQuery = lecturesQuery.where('startTime', '<=', new Date());
-                const lecturesSnapshot = await lecturesQuery.get();
-                totalRelevantLectures = lecturesSnapshot.size;
-                percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
-                console.log(`Attendance calculation for ${requestedUserId}: Attended ${attendedLecturesCount} / Total ${totalRelevantLectures} relevant lectures.`);
-            } else {
-                 console.warn(`Cannot calculate percentage for user ${requestedUserId}: Missing profile details. Percentage based on joined lectures only.`);
-                 totalRelevantLectures = attendanceRecords.length; // Fallback: base percentage on joined lectures
-                 percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
-            }
-        } else {
-             console.warn(`Cannot calculate percentage for user ${requestedUserId}: User document not found. Percentage based on joined lectures only.`);
-             totalRelevantLectures = attendanceRecords.length; // Fallback: base percentage on joined lectures
-             percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
-        }
-    } catch (calcError) {
-        console.error(`Error calculating attendance percentage for user ${requestedUserId}:`, calcError);
-        if (calcError.code === 'failed-precondition' || (calcError.message && calcError.message.includes('index'))) {
-             console.error("Firestore Index Missing for Percentage Calculation.");
-        }
-        console.warn(`Proceeding without accurate percentage calculation due to error.`);
-        totalRelevantLectures = attendanceRecords.length; // Fallback: base percentage on joined lectures
-        percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
+    // --- Fetch user profile to get base criteria (school, dept, course) ---
+    const userDoc = await db.collection(USERS_COLLECTION).doc(requestedUserId).get();
+    if (!userDoc.exists) {
+        console.warn(`Cannot calculate attendance for user ${requestedUserId}: User document not found.`);
+        // Return empty summary if user profile is missing
+        return res.json({
+            attendanceRecords: [],
+            percentage: '0.00',
+            totalLectures: 0,
+            attendedLectures: 0,
+        });
     }
-    // --- End Percentage Calculation ---
 
+    const userData = userDoc.data();
+    const { school, department, course } = userData;
+
+    // Determine the year and semester to use for filtering
+    const filterYear = queryYear || userData.yearOfStudy; // Use query param or fallback to profile
+    const filterSemester = querySemester || userData.semester; // Use query param or fallback to profile
+
+    // Proceed only if we have the necessary criteria (school, dept, course, year, semester)
+    if (school && department && course && filterYear && filterSemester) {
+        try {
+            // --- 1. Query Relevant Lectures for the specific year/semester ---
+            const lecturesRef = db.collection(LECTURES_COLLECTION);
+            const lecturesQuery = lecturesRef
+                .where('school', '==', school)
+                .where('department', '==', department)
+                .where('course', '==', course)
+                .where('yearOfStudy', '==', filterYear) // Use determined filter year
+                .where('semester', '==', filterSemester); // Use determined filter semester
+
+            const lecturesSnapshot = await lecturesQuery.get();
+            relevantLectureIds = lecturesSnapshot.docs.map(doc => doc.id);
+            totalRelevantLectures = relevantLectureIds.length;
+            console.log(`Found ${totalRelevantLectures} relevant lectures for criteria: School=${school}, Dept=${department}, Course=${course}, Year=${filterYear}, Sem=${filterSemester}`);
+
+            if (totalRelevantLectures > 0) {
+                // --- 2. Fetch ALL attendance records for the student ---
+                // Filtered these in memory later based on relevantLectureIds
+                const allAttendanceSnapshot = await db.collection(ATTENDANCE_COLLECTION)
+                                                    .where('userId', '==', requestedUserId)
+                                                    .get();
+
+                // --- 3. Filter attendance records by relevant lecture IDs ---
+                const relevantAttendanceDocs = allAttendanceSnapshot.docs.filter(doc =>
+                    relevantLectureIds.includes(doc.data().lectureId)
+                );
+
+                // --- 4. Format and Count Attended from Filtered Records ---
+                filteredAttendanceRecords = relevantAttendanceDocs.map(doc => {
+                    const data = doc.data();
+                    return {
+                        id: doc.id,
+                        ...data,
+                        checkInTime: formatTimestamp(data.checkInTime),
+                        joinedAt: formatTimestamp(data.joinedAt),
+                        checkedIn: data.checkedIn === true,
+                    };
+                }).sort((a, b) => (b.joinedAt || '').localeCompare(a.joinedAt || '')); // Sort descending by join time
+
+                attendedLecturesCount = filteredAttendanceRecords.filter(record => record.checkedIn === true).length;
+
+                // --- 5. Calculate Percentage ---
+                percentage = (attendedLecturesCount / totalRelevantLectures) * 100;
+                console.log(`Attendance calculation for ${requestedUserId} (Year: ${filterYear}, Sem: ${filterSemester}): Attended ${attendedLecturesCount} / Total ${totalRelevantLectures} relevant lectures.`);
+
+            } else {
+                // No relevant lectures found for the criteria
+                console.log(`No relevant lectures found for user ${requestedUserId} with criteria (Year: ${filterYear}, Sem: ${filterSemester}). Percentage is 0.`);
+                percentage = 0;
+            }
+
+        } catch (calcError) {
+            console.error(`Error calculating attendance percentage for user ${requestedUserId} (Year: ${filterYear}, Sem: ${filterSemester}):`, calcError);
+            if (calcError.code === 'failed-precondition' || (calcError.message && calcError.message.includes('index'))) {
+                 console.error("Firestore Index Missing for Percentage Calculation. Check Firebase console for index creation link.");
+            }
+            console.warn(`Proceeding with potentially inaccurate summary due to calculation error.`);
+            // Fallback: Return 0/empty if calculation failed severely
+            percentage = 0;
+            totalRelevantLectures = 0;
+            attendedLecturesCount = 0;
+            filteredAttendanceRecords = []; // Ensure empty on error
+        }
+    } else {
+        // Missing necessary profile details or filter criteria
+        console.warn(`Cannot calculate attendance for user ${requestedUserId}: Missing profile details (School/Dept/Course) or filter criteria (Year/Semester).`);
+        // Return empty/zero summary
+        percentage = 0;
+        totalRelevantLectures = 0;
+        attendedLecturesCount = 0;
+        filteredAttendanceRecords = [];
+    }
+
+    // --- Prepare final response data ---
     const data = {
-      attendanceRecords,
+      // Return the records filtered by year/semester
+      attendanceRecords: filteredAttendanceRecords,
       percentage: percentage.toFixed(2), // Ensure percentage is always a string with 2 decimal places
       totalLectures: totalRelevantLectures,
       attendedLectures: attendedLecturesCount,
@@ -448,8 +496,10 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
   }
 });
 
-//--- *** MODIFIED: Lecturer view student attendance for a particular lecture (WITH PERCENTAGE) *** ---
+
+//--- Lecturer view student attendance for a particular lecture (WITH OVERALL PERCENTAGE) ---
 // Endpoint: GET /api/firebase/attendance/lecture/:lectureId
+// Calculates each student's OVERALL percentage based on their profile, not just this lecture.
 router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
   try {
     const lectureId = req.params.lectureId;
@@ -482,7 +532,7 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
         ...doc.data()
     }));
 
-    // --- *** NEW: Calculate Percentage for Each Student Concurrently *** ---
+    // --- Calculate OVERALL Percentage for Each Student Concurrently ---
     const percentageCalculationPromises = attendanceRecordsRaw.map(async (record) => {
         let percentage = "N/A"; // Default value if calculation fails or not applicable
         const studentUserId = record.userId;
@@ -497,21 +547,22 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
             const userDoc = await db.collection(USERS_COLLECTION).doc(studentUserId).get();
             if (userDoc.exists) {
                 const userData = userDoc.data();
+                // Use the student's PROFILE year/semester for OVERALL calculation
                 const { school, department, course, yearOfStudy, semester } = userData;
 
                 // 2. Check if profile details are complete
                 if (school && department && course && yearOfStudy && semester) {
-                    // 3. Query relevant lectures (Requires composite index)
+                    // 3. Query relevant lectures based on student's PROFILE (Requires composite index)
                     const lecturesQuery = db.collection(LECTURES_COLLECTION)
                         .where('school', '==', school)
                         .where('department', '==', department)
                         .where('course', '==', course)
-                        .where('yearOfStudy', '==', yearOfStudy)
-                        .where('semester', '==', semester);
+                        .where('yearOfStudy', '==', yearOfStudy) // PROFILE year
+                        .where('semester', '==', semester);      // PROFILE semester
                     const lecturesSnapshot = await lecturesQuery.get();
                     const totalRelevantLectures = lecturesSnapshot.size;
 
-                    // 4. Query attended lectures (Requires index on userId + checkedIn)
+                    // 4. Query ALL attended lectures for this student (Requires index on userId + checkedIn)
                     const attendedQuery = db.collection(ATTENDANCE_COLLECTION)
                         .where('userId', '==', studentUserId)
                         .where('checkedIn', '==', true);
@@ -524,20 +575,20 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
                     } else {
                         percentage = "0.00"; // No relevant lectures found, so percentage is 0
                     }
-                    // console.log(`Percentage for ${studentUserId}: ${attendedLecturesCount}/${totalRelevantLectures} = ${percentage}%`); // Optional detailed log
+                    // console.log(`Overall Percentage for ${studentUserId}: ${attendedLecturesCount}/${totalRelevantLectures} = ${percentage}%`); // Optional detailed log
                 } else {
-                     console.warn(`Cannot calculate percentage for user ${studentUserId}: Missing profile details. Setting percentage to N/A.`);
+                     console.warn(`Cannot calculate overall percentage for user ${studentUserId}: Missing profile details. Setting percentage to N/A.`);
                      // Keep percentage as "N/A" if profile is incomplete
                 }
             } else {
-                 console.warn(`Cannot calculate percentage for user ${studentUserId}: User document not found. Setting percentage to N/A.`);
+                 console.warn(`Cannot calculate overall percentage for user ${studentUserId}: User document not found. Setting percentage to N/A.`);
                  // Keep percentage as "N/A" if user doc not found
             }
         } catch (percError) {
-            console.error(`Error calculating percentage for student ${studentUserId}:`, percError);
+            console.error(`Error calculating overall percentage for student ${studentUserId}:`, percError);
             // Check for index errors specifically
             if (percError.code === 'failed-precondition' || (percError.message && percError.message.includes('index'))) {
-                 console.error(` -> Firestore Index Missing for Percentage Calculation (Student: ${studentUserId}). Check Firebase console.`);
+                 console.error(` -> Firestore Index Missing for Overall Percentage Calculation (Student: ${studentUserId}). Check Firebase console.`);
             }
             // Keep percentage as "N/A" on error
         }
@@ -561,10 +612,10 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
         checkInTime: formatTimestamp(data.checkInTime),
         joinedAt: formatTimestamp(data.joinedAt),
         checkedInBy: data.checkedInBy || null,
-        percentage: data.percentage, // Include the calculated or default percentage
+        percentage: data.percentage, // Include the calculated or default OVERALL percentage
     }));
 
-    console.log(`Fetched ${finalResponseData.length} attendance records (with percentages) for lecture ${lectureId} by request from lecturer ${lecturerUserId}.`);
+    console.log(`Fetched ${finalResponseData.length} attendance records (with overall percentages) for lecture ${lectureId} by request from lecturer ${lecturerUserId}.`);
     res.json(finalResponseData); // Return the array of records with percentages
 
   } catch (error) {
@@ -584,6 +635,6 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
     });
   }
 });
-//--- *** END MODIFIED ROUTE *** ---
+
 
 module.exports = router;

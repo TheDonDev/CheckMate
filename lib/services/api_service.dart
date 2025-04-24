@@ -416,11 +416,29 @@ class ApiService {
 
   // --- Student Attendance Summary ---
   /// Fetches the student's attendance summary (records, percentage, counts).
-  /// Backend calculates percentage based on relevant lectures for the student.
-  Future<Map<String, dynamic>> getStudentAttendanceSummary(String userId) async {
+  /// *** MODIFIED: Accepts optional year and semester for filtering. ***
+  /// Backend calculates percentage based on relevant lectures for the student,
+  /// filtered by year/semester if provided.
+  Future<Map<String, dynamic>> getStudentAttendanceSummary(
+    String userId, {
+    String? year, // Optional year filter
+    String? semester, // Optional semester filter
+  }) async {
     // Endpoint assumes backend route is GET /attendance/student/{userId}
-    final uri = Uri.parse('$_baseUrl/attendance/student/$userId'); // Adjust if needed
-    if (kDebugMode) print("API Request: GET $uri");
+    // Add year and semester as query parameters if they are provided
+    final queryParams = <String, String>{};
+    if (year != null && year.isNotEmpty) {
+      queryParams['year'] = year;
+    }
+    if (semester != null && semester.isNotEmpty) {
+      queryParams['semester'] = semester;
+    }
+
+    final uri = Uri.parse('$_baseUrl/attendance/student/$userId').replace(
+      queryParameters: queryParams.isNotEmpty ? queryParams : null, // Add query params only if they exist
+    );
+
+    if (kDebugMode) print("API Request: GET $uri"); // Log the full URI with query params
     try {
       final response = await http.get(
         uri,
