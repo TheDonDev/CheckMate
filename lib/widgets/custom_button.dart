@@ -64,7 +64,7 @@ class CustomButton extends StatelessWidget {
       );
     } else if (icon != null) {
       // If icon is provided, use ElevatedButton.icon structure internally
-      // Note: ElevatedButton.icon handles spacing automatically
+      //  ElevatedButton.icon handles spacing automatically
       buttonChild = Row(
         mainAxisSize: MainAxisSize.min, // Don't stretch row
         children: [

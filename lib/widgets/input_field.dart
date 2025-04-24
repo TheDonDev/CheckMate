@@ -46,7 +46,7 @@ class InputField extends StatelessWidget {
       suffixIcon: suffixIcon, // Suffix icon usually handles its own color (like visibility toggle)
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        // Optional: Define borderSide if needed
+        // Define borderSide if needed
         // borderSide: BorderSide(color: Colors.grey.shade400),
       ),
       enabledBorder: OutlineInputBorder( // Style for normal state

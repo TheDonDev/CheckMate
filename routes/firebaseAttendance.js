@@ -24,8 +24,8 @@ const formatTimestamp = (timestamp) => {
   if (typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp)) {
      return timestamp; // Return as is if it looks like an ISO string
   }
-  console.warn(`Could not format timestamp for client:`, timestamp);
-  return null; // Return null if format is unrecognized
+  // console.warn(`Could not format timestamp for client:`, timestamp); // Reduced verbosity
+  return null; // Return null if format is unrecognized or null/undefined
 };
 
 
@@ -411,12 +411,12 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
                 console.log(`Attendance calculation for ${requestedUserId}: Attended ${attendedLecturesCount} / Total ${totalRelevantLectures} relevant lectures.`);
             } else {
                  console.warn(`Cannot calculate percentage for user ${requestedUserId}: Missing profile details. Percentage based on joined lectures only.`);
-                 totalRelevantLectures = attendanceRecords.length;
+                 totalRelevantLectures = attendanceRecords.length; // Fallback: base percentage on joined lectures
                  percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
             }
         } else {
              console.warn(`Cannot calculate percentage for user ${requestedUserId}: User document not found. Percentage based on joined lectures only.`);
-             totalRelevantLectures = attendanceRecords.length;
+             totalRelevantLectures = attendanceRecords.length; // Fallback: base percentage on joined lectures
              percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
         }
     } catch (calcError) {
@@ -425,14 +425,14 @@ router.get('/student/:userId', checkAuth, async (req, res) => {
              console.error("Firestore Index Missing for Percentage Calculation.");
         }
         console.warn(`Proceeding without accurate percentage calculation due to error.`);
-        totalRelevantLectures = attendanceRecords.length;
+        totalRelevantLectures = attendanceRecords.length; // Fallback: base percentage on joined lectures
         percentage = totalRelevantLectures > 0 ? (attendedLecturesCount / totalRelevantLectures) * 100 : 0;
     }
     // --- End Percentage Calculation ---
 
     const data = {
       attendanceRecords,
-      percentage: percentage.toFixed(2),
+      percentage: percentage.toFixed(2), // Ensure percentage is always a string with 2 decimal places
       totalLectures: totalRelevantLectures,
       attendedLectures: attendedLecturesCount,
     };
@@ -484,7 +484,7 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
 
     // --- *** NEW: Calculate Percentage for Each Student Concurrently *** ---
     const percentageCalculationPromises = attendanceRecordsRaw.map(async (record) => {
-        let percentage = "N/A"; // Default value if calculation fails
+        let percentage = "N/A"; // Default value if calculation fails or not applicable
         const studentUserId = record.userId;
 
         if (!studentUserId) {
@@ -522,14 +522,16 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
                     if (totalRelevantLectures > 0) {
                         percentage = ((attendedLecturesCount / totalRelevantLectures) * 100).toFixed(2);
                     } else {
-                        percentage = "0.00"; // No relevant lectures found
+                        percentage = "0.00"; // No relevant lectures found, so percentage is 0
                     }
                     // console.log(`Percentage for ${studentUserId}: ${attendedLecturesCount}/${totalRelevantLectures} = ${percentage}%`); // Optional detailed log
                 } else {
-                     console.warn(`Cannot calculate percentage for user ${studentUserId}: Missing profile details.`);
+                     console.warn(`Cannot calculate percentage for user ${studentUserId}: Missing profile details. Setting percentage to N/A.`);
+                     // Keep percentage as "N/A" if profile is incomplete
                 }
             } else {
-                 console.warn(`Cannot calculate percentage for user ${studentUserId}: User document not found.`);
+                 console.warn(`Cannot calculate percentage for user ${studentUserId}: User document not found. Setting percentage to N/A.`);
+                 // Keep percentage as "N/A" if user doc not found
             }
         } catch (percError) {
             console.error(`Error calculating percentage for student ${studentUserId}:`, percError);
@@ -559,7 +561,7 @@ router.get('/lecture/:lectureId', checkAuth, async (req, res) => {
         checkInTime: formatTimestamp(data.checkInTime),
         joinedAt: formatTimestamp(data.joinedAt),
         checkedInBy: data.checkedInBy || null,
-        percentage: data.percentage, // Include the calculated percentage
+        percentage: data.percentage, // Include the calculated or default percentage
     }));
 
     console.log(`Fetched ${finalResponseData.length} attendance records (with percentages) for lecture ${lectureId} by request from lecturer ${lecturerUserId}.`);

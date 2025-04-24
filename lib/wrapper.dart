@@ -66,15 +66,15 @@ class Wrapper extends StatelessWidget {
           }
           // --- End Sync Call ---
 
-          // --- Optional: Check Email Verification for UI/UX ---
+          // --- Check Email Verification for UI/UX ---
           // Even though sync is happening, we might want to show a specific screen
           // if the email isn't verified yet, prompting the user.
           if (fbUser != null && !fbUser.emailVerified) {
             print("Wrapper: User email not verified: ${fbUser.email}. Consider redirecting.");
-            // **Option 1: Redirect to a dedicated verification screen**
-            // return EmailVerificationScreen(email: fbUser.email!); // Create this screen
+            // ** Redirect to a dedicated verification screen**
+            // return EmailVerificationScreen(email: fbUser.email!); 
 
-            // **Option 2: Show dashboard but maybe with a banner/warning**
+            // ** Show dashboard but maybe with a warning**
             // (Proceeding with dashboard navigation for now as per original logic)
           }
 

@@ -215,9 +215,9 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       return;
     }
 
-    // --- ADDED: Get online link value conditionally ---
+  
     String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
-    // --- END ADDED ---
+
 
     setState(() => _isLoading = true);
 
@@ -234,9 +234,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       'endTime': endDateTime.toIso8601String(),
       // 'course' is usually not editable here, but send it if backend needs it
       // 'course': widget.lecture.course,
-      // --- ADDED: Include onlineLinkValue (will be null if venue != ONLINE) ---
       'onlineLink': onlineLinkValue,
-      // --- END ADDED ---
     };
 
     try {
@@ -378,15 +376,13 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                   decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
                   value: _selectedVenue,
                   items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
-                  // --- MODIFIED: Update state on change ---
                   onChanged: (val) => setState(() => _selectedVenue = val),
-                  // --- END MODIFIED ---
                   validator: (value) => value == null ? 'Venue is required' : null,
                   isExpanded: true,
                 ),
                 // --- END Venue Dropdown ---
 
-                // --- ADDED: Conditional Online Link Field ---
+                // --- Conditional Online Link Field ---
                 if (_selectedVenue == 'ONLINE') ...[
                   const SizedBox(height: 12),
                   TextFormField(

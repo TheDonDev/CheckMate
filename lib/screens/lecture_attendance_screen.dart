@@ -2,9 +2,8 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
-// Ensure these are imported
 import 'package:checkmate/models/lecture.dart';
-import 'package:checkmate/models/attendance_record.dart'; // Correctly imported
+import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/services/api_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -44,7 +43,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     });
   }
 
-  // --- _captureAndShareQrCode (No changes needed) ---
+  // --- _captureAndShareQrCode ---
   Future<void> _captureAndShareQrCode() async {
     try {
       if (_qrKey.currentContext == null) { throw Exception("QR Code context not found."); }
@@ -81,7 +80,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     }
   }
 
-  // --- _showQrCodeDialog (No changes needed) ---
+  // --- _showQrCodeDialog  ---
   void _showQrCodeDialog() {
     if (widget.lecture.id.isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar( const SnackBar(content: Text('Error: Lecture ID is missing.'), backgroundColor: Colors.red), ); return;
@@ -147,22 +146,32 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     );
   }
 
-  // --- _buildPercentageWidget (No changes needed) ---
+  // --- _buildPercentageWidget  ---
   Widget _buildPercentageWidget(String? percentageString) {
-    if (percentageString == null || percentageString == "N/A") {
+    if (percentageString == null || percentageString == "N/A" || percentageString.isEmpty) {
       return Tooltip(
         message: 'Percentage unavailable',
         child: Icon(Icons.percent_outlined, color: Colors.grey.shade400, size: 16),
       );
     }
-    final double percentageValue = double.tryParse(percentageString) ?? -1.0;
 
-    if (percentageValue < 0) {
-       if (kDebugMode) print("Warning: Could not parse percentage string '$percentageString'");
-       return Tooltip(
-         message: 'Invalid percentage data',
-         child: Icon(Icons.error_outline, color: Colors.red.shade300, size: 16),
-       );
+    double? percentageValue;
+    try {
+      percentageValue = double.parse(percentageString);
+    } catch (e) {
+      if (kDebugMode) print("Warning: Could not parse percentage string '$percentageString': $e");
+      return Tooltip(
+        message: 'Invalid percentage data',
+        child: Icon(Icons.error_outline, color: Colors.red.shade300, size: 16),
+      );
+    }
+
+    if (percentageValue < 0 || percentageValue.isNaN || percentageValue.isInfinite) {
+      if (kDebugMode) print("Warning: Invalid percentage value: $percentageValue");
+      return Tooltip(
+        message: 'Invalid percentage data',
+        child: Icon(Icons.error_outline, color: Colors.red.shade300, size: 16),
+      );
     }
 
     final Color percColor = percentageValue >= 75 ? Colors.green.shade700 :
@@ -221,7 +230,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
             // Success State - Display List
             final attendanceList = snapshot.data!;
 
-            // *** CORRECTED SORT LOGIC ***
+            // *** SORT LOGIC ***
             // Sort based on the actual types defined in AttendanceRecord
             attendanceList.sort((a, b) {
                // Access 'checkedIn' directly - it's non-nullable (bool) in the model
@@ -253,12 +262,13 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
             });
             // *** END SORT LOGIC CORRECTION ***
 
+            // --- UPDATED ListView.separated ---
             return ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 0),
               itemCount: attendanceList.length,
               separatorBuilder: (context, index) => const Divider(height: 0.5, thickness: 0.5, indent: 72, endIndent: 16),
-              itemBuilder: (context, index) {
+              itemBuilder: (context, index) { // Start of updated itemBuilder
                 final record = attendanceList[index];
                 // Access 'checkedIn' directly (it's bool)
                 final bool isCheckedIn = record.checkedIn;
@@ -287,6 +297,12 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                   statusIcon = Icons.hourglass_top_rounded;
                 }
 
+                // --- ***  DEBUG PRINT *** ---
+                if (kDebugMode) {
+                  print("Record $index (${record.studentName}): Percentage value = '${record.percentage}', Type = ${record.percentage.runtimeType}");
+                }
+                // --- *** DEBUG PRINT *** ---
+
                 // Build ListTile directly using data from record
                 return ListTile(
                   leading: CircleAvatar( backgroundColor: statusColor.withOpacity(0.12), foregroundColor: statusColor, child: Text( (index + 1).toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), ), ),
@@ -305,14 +321,15 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                       ),
                       const SizedBox(width: 8),
                       // Use the helper widget (already handles null percentage)
-                      _buildPercentageWidget(record.percentage),
+                      _buildPercentageWidget(record.percentage), // Pass the value here
                     ],
                   ),
                   trailing: Chip( avatar: Icon(statusIcon, color: statusColor, size: 16), label: Text( statusText, style: TextStyle(fontSize: 11.5, color: statusColor, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis, ), backgroundColor: statusColor.withOpacity(0.1), side: BorderSide.none, padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), visualDensity: VisualDensity.compact, ),
                   dense: true,
                 );
-              },
+              }, // End of updated itemBuilder
             );
+            // --- END UPDATED ListView.separated ---
           },
         ),
       ),

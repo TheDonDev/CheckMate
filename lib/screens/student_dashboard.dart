@@ -11,9 +11,7 @@ import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:checkmate/screens/qr_scanner_screen.dart';
 import 'package:collection/collection.dart';
-// --- ADDED: Import url_launcher ---
 import 'package:url_launcher/url_launcher.dart';
-// --- END ADDED ---
 
 class StudentDashboard extends StatefulWidget {
   final app_user.User currentUser;

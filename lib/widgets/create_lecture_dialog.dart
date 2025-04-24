@@ -1,5 +1,5 @@
 // lib/widgets/create_lecture_dialog.dart
-import 'package:checkmate/constants/dropdown_data.dart'; // Keep for Year, Semester, Venue
+import 'package:checkmate/constants/dropdown_data.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/api_service.dart';
@@ -39,9 +39,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   final _lecturerPhoneController = TextEditingController();
   final _unitNameController = TextEditingController();
   final _unitCodeController = TextEditingController();
-  // --- ADDED: Controller for online link ---
   final _onlineLinkController = TextEditingController();
-  // --- END ADDED ---
 
   // State variables for dropdowns and pickers
   String? _selectedYear;
@@ -66,9 +64,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     _lecturerPhoneController.dispose();
     _unitNameController.dispose();
     _unitCodeController.dispose();
-    // --- ADDED: Dispose online link controller ---
     _onlineLinkController.dispose();
-    // --- END ADDED ---
     super.dispose();
   }
 
@@ -183,12 +179,10 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
   // Method to handle form submission
   Future<void> _submitForm() async {
-    // --- MODIFIED: Check form validity FIRST ---
     if (!_formKey.currentState!.validate()) {
        _showValidationError('Please fill in all required fields correctly.');
        return; // Stop if basic validation fails
     }
-    // --- END MODIFIED ---
 
     // Check other selections
     if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
@@ -216,9 +210,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         _showValidationError('Cannot create a lecture for a past date.'); return;
     }
 
-    // --- ADDED: Get online link value conditionally ---
     String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
-    // --- END ADDED ---
 
     setState(() => _isLoading = true);
 
@@ -239,16 +231,14 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       startTime: startDateTime,
       endTime: endDateTime,
       venue: _selectedVenue!,
-      // --- ADDED: Pass onlineLinkValue ---
       onlineLink: onlineLinkValue,
-      // --- END ADDED ---
-      createdAt: null, // Let backend handle timestamp
+      createdAt: null,
     );
 
     try {
       await _apiService.createLecture(newLecture); // API service uses lecture.toApiJson()
       if (!mounted) return;
-      Navigator.of(context).pop(true); // Success
+      Navigator.of(context).pop(true);
     } catch (e) {
        if (!mounted) return;
        // Show specific error from ApiException if available
@@ -264,7 +254,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         setState(() => _isLoading = false);
       }
     }
-    // Removed the redundant else block for form validation
+
   }
 
   // Helper to show validation error snackbar
@@ -451,9 +441,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
                   value: _selectedVenue,
                   items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
-                  // --- MODIFIED: Update state on change ---
                   onChanged: (val) => setState(() => _selectedVenue = val),
-                  // --- END MODIFIED ---
                   validator: (value) => value == null ? 'Venue is required' : null,
                   isExpanded: true,
                 ),

@@ -124,7 +124,11 @@ class AttendanceRecord {
 
   // --- API Conversion Methods (If interacting via backend API) ---
   factory AttendanceRecord.fromApiJson(Map<String, dynamic> json) {
-    return AttendanceRecord(
+      String? percentageValue;
+      if (json['percentage'] != null) {
+        percentageValue = json['percentage'].toString(); // Safely convert to string if not null
+        }
+        return AttendanceRecord(
       // Use 'id' or '_id' from API, fallback
       id: json['id'] as String? ?? json['_id'] as String? ?? '',
       lectureId: json['lectureId'] as String? ?? '',
@@ -135,6 +139,7 @@ class AttendanceRecord {
       checkedIn: _parseBool(json['checkedIn']), // Use checkedIn and safe parsing
       checkInTime: _parseTimestamp(json['checkInTime']), // nullable
       checkedInBy: json['checkedInBy'] as String?,
+      percentage: percentageValue,  // Ensure it's treated as String?
     );
   }
 
