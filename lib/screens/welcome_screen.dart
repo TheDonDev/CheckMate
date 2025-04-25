@@ -1,4 +1,5 @@
-import 'dart:async'; // For Timer if needed, though controller handles repetition
+import 'dart:async'; // For Timer
+import 'dart:math'; // For Random
 import 'package:checkmate/screens/login_screen.dart';
 import 'package:checkmate/screens/register_screen.dart';
 import 'package:flutter/material.dart';
@@ -10,170 +11,207 @@ class WelcomeScreen extends StatefulWidget {
   State<WelcomeScreen> createState() => _WelcomeScreenState();
 }
 
-// Use SingleTickerProviderStateMixin for the AnimationController
+// Use TickerProviderStateMixin for multiple controllers if needed,
+// but SingleTickerProviderStateMixin is fine for just the background fade.
 class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _fadeAnimation; // Controls the opacity of the incoming image
-
-  // List of background images
+  // --- Background Animation ---
+  late AnimationController _backgroundController;
+  late Animation<double> _backgroundFadeAnimation;
   final List<String> _backgroundImages = [
     'assets/images/WorkStationDay.jpg',
-    'assets/images/WorkStationLine.jpg',
     'assets/images/WorkStationNight.jpg',
-    'assets/images/WorkStationLine2.jpg',
+    'assets/images/Alupe-.jpeg',
+    'assets/images/MV3.jpg',
+    'assets/images/nai3.jpg',
   ];
+  int _currentBackgroundIndex = 0;
 
-  int _currentIndex = 0; // Index of the image currently fully visible or fading out
+  // --- Quote Animation ---
+  final List<String> _quotes = [
+    "The journey of a thousand miles begins with a single step.",
+    "Success is not final, failure is not fatal: It is the courage to continue that counts.",
+    "Believe you can and you're halfway there.",
+    "The only way to do great work is to love what you do.",
+    "Strive not to be a success, but rather to be of value.",
+    "The mind is everything. What you think you become.",
+    "Your time is limited, don't waste it living someone else's life.",
+    "Education is the passport to the future, for tomorrow belongs to those who prepare for it today.",
+    "The expert in anything was once a beginner.",
+    "It always seems impossible until it's done.",
+  ];
+  int _currentQuoteIndex = 0;
+  Timer? _quoteTimer; // Timer to change quotes
 
-  // Define the brand color from pubspec.yaml
+  // --- Constants ---
   static const Color brandColor = Color(0xFF0175C2);
 
   @override
   void initState() {
     super.initState();
 
-    // Initialize the AnimationController
-    _controller = AnimationController(
-      duration: const Duration(seconds: 2), // Duration for the fade transition
+    // --- Initialize Background Animation ---
+    _backgroundController = AnimationController(
+      // Slightly faster fade for background
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
-
-    // Create a Tween for the fade animation (0.0 = transparent, 1.0 = opaque)
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn), // Smoother fade
+    _backgroundFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _backgroundController, curve: Curves.easeInOut), // Smoother curve
     );
-
-    // Add a listener to update the index when one fade cycle completes
-    _controller.addStatusListener((status) {
+    _backgroundController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        // Short pause showing the fully faded-in image
-        Future.delayed(const Duration(seconds: 3), () {
+        // Slightly longer pause showing the fully faded-in image
+        Future.delayed(const Duration(seconds: 4), () { // Total cycle ~5.5s
           if (mounted) {
-            // Prepare for the next fade: update index *before* reversing
             setState(() {
-              _currentIndex = (_currentIndex + 1) % _backgroundImages.length;
-              // Reset controller immediately to start the next cycle's fade-in
-              _controller.forward(from: 0.0);
+              _currentBackgroundIndex = (_currentBackgroundIndex + 1) % _backgroundImages.length;
+              _backgroundController.forward(from: 0.0); // Start next fade-in
             });
           }
         });
       }
     });
-
-    // Start the first fade-in animation after an initial delay
-    Future.delayed(const Duration(seconds: 1), () {
+    // Start the first background fade-in
+    Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
-        _controller.forward();
+        _backgroundController.forward();
+      }
+    });
+
+    // --- Initialize Quote Animation ---
+    // Select initial random quote
+    _currentQuoteIndex = Random().nextInt(_quotes.length);
+
+    // Start timer to change quotes periodically
+    _quoteTimer = Timer.periodic(const Duration(seconds: 7), (timer) { // Change quote every 7 seconds
+      if (mounted) {
+        setState(() {
+          // Select a new random index, ensuring it's different from the current one if possible
+          int nextIndex;
+          if (_quotes.length > 1) {
+            do {
+              nextIndex = Random().nextInt(_quotes.length);
+            } while (nextIndex == _currentQuoteIndex);
+            _currentQuoteIndex = nextIndex;
+          } else {
+             _currentQuoteIndex = 0; // Handle case with only one quote
+          }
+        });
       }
     });
   }
 
   @override
   void dispose() {
-    _controller.dispose(); // Dispose the controller when the widget is removed
+    _backgroundController.dispose();
+    _quoteTimer?.cancel(); // Cancel the quote timer
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Calculate the index of the next image to fade in
-    int nextIndex = (_currentIndex + 1) % _backgroundImages.length;
-    final textTheme = Theme.of(context).textTheme; // Get text theme for consistency
+    int nextBackgroundIndex = (_currentBackgroundIndex + 1) % _backgroundImages.length;
+    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
-      // Prevent content from going under system status bar/notches etc.
-      // but allow background to fill the whole screen.
       body: Stack(
-        fit: StackFit.expand, // Make stack children fill the screen
+        fit: StackFit.expand,
         children: [
           // --- Background Image Layer ---
-          // Base image (current or fading out)
           Image.asset(
-            _backgroundImages[_currentIndex],
+            _backgroundImages[_currentBackgroundIndex],
             fit: BoxFit.cover,
-            key: ValueKey<int>(_currentIndex), // Key helps Flutter identify the image
-            gaplessPlayback: true, // Prevents flicker during transition
+            key: ValueKey<int>(_currentBackgroundIndex),
+            gaplessPlayback: true,
           ),
-
-          // Fading-in image on top
           FadeTransition(
-            opacity: _fadeAnimation,
+            opacity: _backgroundFadeAnimation,
             child: Image.asset(
-              _backgroundImages[nextIndex],
+              _backgroundImages[nextBackgroundIndex],
               fit: BoxFit.cover,
-              key: ValueKey<int>(nextIndex),
+              key: ValueKey<int>(nextBackgroundIndex),
               gaplessPlayback: true,
             ),
           ),
 
-          // --- Darkening Overlay for Text Contrast ---
+          // --- Darkening Overlay ---
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  Colors.black.withOpacity(0.1), // Less dark at the top
+                  Colors.black.withOpacity(0.1),
                   Colors.black.withOpacity(0.4),
-                  Colors.black.withOpacity(0.7), // Darker towards the bottom
+                  Colors.black.withOpacity(0.7),
                 ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                stops: const [0.0, 0.4, 1.0], // Control gradient points
+                stops: const [0.0, 0.4, 1.0],
               ),
             ),
           ),
 
-          // --- Content Layer (Title, Buttons) ---
-          SafeArea( // Keep content within safe areas (avoids notches/system bars)
+          // --- Content Layer ---
+          SafeArea(
             child: Padding(
-              // Increased vertical padding, consistent horizontal
               padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 50.0),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween, // Pushes content to top and bottom
-                crossAxisAlignment: CrossAxisAlignment.center, // Center content horizontally
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // --- Top Section (Logo & Title) ---
+                  // --- Top Section (Logo, Title, Subtitle, Quote) ---
                   Column(
-                    mainAxisSize: MainAxisSize.min, // Take minimum vertical space
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const SizedBox(height: 20), // Space from top safe area
-                      // Use the actual logo asset specified in pubspec.yaml if 'image.png' is placeholder
+                      const SizedBox(height: 20),
                       Image.asset(
-                        'assets/images/image.png', // Replace if needed
-                        height: 80, // Adjust size as needed
-                        // Consider adding semantic label for accessibility
-                        // semanticLabel: 'CheckMate App Logo',
+                        'assets/images/image.png',
+                        height: 80,
                       ),
                       const SizedBox(height: 20),
                       Text(
                         'CheckMate',
                         textAlign: TextAlign.center,
-                        style: textTheme.displaySmall?.copyWith( // Use semantic theme style
+                        style: textTheme.displaySmall?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          shadows: [
-                            Shadow(
-                              blurRadius: 8.0,
-                              color: Colors.black.withOpacity(0.6),
-                              offset: const Offset(1.0, 1.0),
-                            ),
-                          ],
+                          shadows: [ Shadow( blurRadius: 8.0, color: Colors.black.withOpacity(0.6), offset: const Offset(1.0, 1.0), ), ],
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Effortless Attendance Tracking',
                         textAlign: TextAlign.center,
-                        style: textTheme.titleMedium?.copyWith( // Use semantic theme style
+                        style: textTheme.titleMedium?.copyWith(
                           color: Colors.white.withOpacity(0.9),
-                           shadows: [ // Subtle shadow for better readability
-                            Shadow(
-                              blurRadius: 4.0,
-                              color: Colors.black.withOpacity(0.5),
-                              offset: const Offset(0.5, 0.5),
-                            ),
-                          ],
+                           shadows: [ Shadow( blurRadius: 4.0, color: Colors.black.withOpacity(0.5), offset: const Offset(0.5, 0.5), ), ],
                         ),
                       ),
+                      const SizedBox(height: 30), // Space before quote
+
+                      // --- Animated Quote ---
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 1200), // Duration of the fade
+                        transitionBuilder: (Widget child, Animation<double> animation) {
+                          // Use FadeTransition for smooth fade in/out
+                          return FadeTransition(opacity: animation, child: child);
+                        },
+                        child: Padding(
+                          // Ensure padding is applied to the Text, not the Switcher
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Text(
+                            _quotes[_currentQuoteIndex],
+                            // Key is crucial for AnimatedSwitcher to detect change
+                            key: ValueKey<int>(_currentQuoteIndex),
+                            textAlign: TextAlign.center,
+                            style: textTheme.titleMedium?.copyWith(
+                              color: Colors.white.withOpacity(0.95),
+                              fontStyle: FontStyle.italic,
+                              shadows: [ Shadow( blurRadius: 5.0, color: Colors.black.withOpacity(0.7), offset: const Offset(0.5, 0.5), ), ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // --- End Animated Quote ---
                     ],
                   ),
 
@@ -181,52 +219,35 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Login Button - Primary Action (Uses Brand Color)
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 52), // Full width, slightly taller
-                          backgroundColor: brandColor, // Use the defined brand color
-                          foregroundColor: Colors.white, // White text for contrast
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30), // Smooth curves
-                          ),
-                          elevation: 5, // Add subtle elevation
-                          textStyle: textTheme.titleMedium?.copyWith( // Consistent text style
-                            fontWeight: FontWeight.bold,
-                          ),
+                          minimumSize: const Size(double.infinity, 52),
+                          backgroundColor: brandColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(30), ),
+                          elevation: 5,
+                          textStyle: textTheme.titleMedium?.copyWith( fontWeight: FontWeight.bold, ),
                         ),
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const LoginScreen()),
-                          );
+                          Navigator.push( context, MaterialPageRoute(builder: (context) => const LoginScreen()), );
                         },
                         child: const Text('Login'),
                       ),
-                      const SizedBox(height: 16), // Consistent spacing
-
-                      // Register Button - Secondary Action (Outlined)
+                      const SizedBox(height: 16),
                       OutlinedButton(
                          style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 52), // Match height
-                          foregroundColor: Colors.white, // White text for contrast on dark overlay
-                          side: const BorderSide(color: Colors.white, width: 1.5), // Clear white border
-                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30), // Match shape
-                          ),
-                           textStyle: textTheme.titleMedium?.copyWith( // Consistent text style
-                            fontWeight: FontWeight.bold,
-                          ),
+                          minimumSize: const Size(double.infinity, 52),
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white, width: 1.5),
+                           shape: RoundedRectangleBorder( borderRadius: BorderRadius.circular(30), ),
+                           textStyle: textTheme.titleMedium?.copyWith( fontWeight: FontWeight.bold, ),
                         ),
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                          );
+                          Navigator.push( context, MaterialPageRoute(builder: (context) => const RegisterScreen()), );
                         },
                         child: const Text('Register'),
                       ),
-                       const SizedBox(height: 10), // Space at the very bottom before edge
+                       const SizedBox(height: 10),
                     ],
                   ),
                 ],
