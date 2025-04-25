@@ -1,6 +1,6 @@
 // lib/screens/student_dashboard.dart
 import 'package:checkmate/models/app_user.dart' as app_user;
-import 'package:checkmate/models/lecture.dart';
+import 'package:checkmate/models/lecture.dart'; // Ensure Lecture model has DateTime? endTime
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/services/auth_service.dart';
@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:checkmate/screens/qr_scanner_screen.dart';
 import 'package:collection/collection.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:async'; // Import for TimeoutException
 
 class StudentDashboard extends StatefulWidget {
   final app_user.User currentUser;
@@ -24,117 +25,113 @@ class _StudentDashboardState extends State<StudentDashboard> {
   final ApiService apiService = ApiService();
 
   Future<List<Lecture>>? lecturesFuture;
-  String? _processingLectureId; // Tracks which lecture action is currently processing
+  String? _processingLectureId;
 
-  // User profile details (fixed after login)
+  // User profile details
   String? fixedSchool;
   String? fixedDepartment;
   String? fixedCourse;
   String? fixedYearOfStudy;
   String? fixedSemester;
 
-
   // Attendance summary state
   bool _isLoadingSummary = true;
   String? _summaryError;
-  String? _attendancePercentage; // Still store the raw string from API
+  String? _attendancePercentage;
   int? _totalLectures;
   int? _attendedLectures;
-  List<AttendanceRecord>? _summaryAttendanceRecords; // Cache for status checks
+  List<AttendanceRecord>? _summaryAttendanceRecords;
 
-  static const Color brandColor = Color(0xFF0175C2); // App's brand color
+  static const Color brandColor = Color(0xFF0175C2);
 
   @override
   void initState() {
     super.initState();
-    // Store fixed user details
     fixedSchool = widget.currentUser.school;
     fixedDepartment = widget.currentUser.department;
     fixedCourse = widget.currentUser.course;
     fixedYearOfStudy = widget.currentUser.yearOfStudy;
     fixedSemester = widget.currentUser.semester;
 
-    // Check if registration number is present, crucial for attendance
-    if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
-       WidgetsBinding.instance.addPostFrameCallback((_) {
-         if (mounted) { _showMissingRegNumError(); }
-       });
-    }
-    // Check if year/semester are also present
-    else if (fixedYearOfStudy == null || fixedYearOfStudy!.isEmpty || fixedSemester == null || fixedSemester!.isEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-         if (mounted) { _showMissingYearSemesterError(); }
-       });
-    }
-    else {
-      // If reg number AND year/semester exist, load data immediately
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          loadLectures();
-          _loadAttendanceSummary();
-        }
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
+        _showMissingRegNumError();
+      } else if (fixedYearOfStudy == null || fixedYearOfStudy!.isEmpty || fixedSemester == null || fixedSemester!.isEmpty) {
+        _showMissingYearSemesterError();
+      } else {
+        loadLectures();
+        _loadAttendanceSummary();
+      }
+    });
   }
 
-  // Dialog shown if student registration number is missing
+  // --- Dialogs ---
   void _showMissingRegNumError() {
+     // Ensure context and builder are correctly passed
      showDialog(
-        context: context,
+        context: context, // Pass the current BuildContext
         barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          title: const Row(
-             children: [ Icon(Icons.error_outline, color: Colors.red), SizedBox(width: 10), Text('Registration Incomplete'), ],
-          ),
-          content: const Text('Your student registration number is missing.\nPlease contact support or update your profile to use attendance features.'),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                 Navigator.of(context).pop();
-                 await Provider.of<AuthService>(context, listen: false).logout();
-                 if (mounted) {
-                    Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
-                 }
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Logout'),
+        builder: (BuildContext dialogContext) { // Use a different context name for builder
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: const Row(
+               children: [ Icon(Icons.error_outline, color: Colors.red), SizedBox(width: 10), Text('Registration Incomplete'), ],
             ),
-          ],
-        ),
+            content: const Text('Your student registration number is missing.\nPlease contact support or update your profile to use attendance features.'),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                   Navigator.of(dialogContext).pop(); // Use dialogContext
+                   // Use context from the State, not dialogContext for Provider
+                   await Provider.of<AuthService>(context, listen: false).logout();
+                   if (mounted) {
+                      // Use context from the State for navigation
+                      Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
+                   }
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Logout'),
+              ),
+            ],
+          );
+        } // End builder
      );
   }
 
-  // Dialog shown if student year/semester is missing
   void _showMissingYearSemesterError() {
+     // Ensure context and builder are correctly passed
      showDialog(
-        context: context,
+        context: context, // Pass the current BuildContext
         barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-          title: const Row(
-             children: [ Icon(Icons.error_outline, color: Colors.orange), SizedBox(width: 10), Text('Profile Incomplete'), ],
-          ),
-          content: const Text('Your Year of Study or Semester is missing.\nPlease contact support or update your profile.'),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                 Navigator.of(context).pop();
-                 await Provider.of<AuthService>(context, listen: false).logout();
-                 if (mounted) {
-                    Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
-                 }
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Logout'),
+        builder: (BuildContext dialogContext) { // Use a different context name for builder
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: const Row(
+               children: [ Icon(Icons.error_outline, color: Colors.orange), SizedBox(width: 10), Text('Profile Incomplete'), ],
             ),
-          ],
-        ),
+            content: const Text('Your Year of Study or Semester is missing.\nPlease contact support or update your profile.'),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                   Navigator.of(dialogContext).pop(); // Use dialogContext
+                   // Use context from the State, not dialogContext for Provider
+                   await Provider.of<AuthService>(context, listen: false).logout();
+                   if (mounted) {
+                      // Use context from the State for navigation
+                      Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
+                   }
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Logout'),
+              ),
+            ],
+          );
+        } // End builder
      );
   }
 
-
-  // Fetches lectures from the API based on FIXED user details
+  // --- Data Loading ---
   void loadLectures() {
     if (fixedSchool == null || fixedDepartment == null || fixedCourse == null || fixedYearOfStudy == null || fixedSemester == null) {
       if (kDebugMode) print("Cannot load lectures: Missing fixed user details.");
@@ -148,8 +145,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
       );
     });
   }
-
-  // Fetches the student's attendance summary for the FIXED year/semester
   Future<void> _loadAttendanceSummary() async {
     if (!mounted || widget.currentUser.id.isEmpty) return;
     if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
@@ -171,7 +166,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
       if (!mounted) return;
       setState(() {
-        // Store the raw percentage string
         _attendancePercentage = summaryData['percentage'] as String?;
         _totalLectures = summaryData['totalLectures'] as int?;
         _attendedLectures = summaryData['attendedLectures'] as int?;
@@ -190,7 +184,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
-  // --- URL Launcher Helper ---
+  // --- Helpers ---
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString.trim());
     final Uri launchUri = url.hasScheme ? url : Uri.parse('https://$urlString');
@@ -206,7 +200,80 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
-  // --- _handleStudentJoin ---
+  void showSnackBar(String message, {bool isError = false}) {
+      if (!mounted) return;
+     ScaffoldMessenger.of(context).showSnackBar(
+       SnackBar(
+         content: Text(message),
+         backgroundColor: isError ? Theme.of(context).colorScheme.error : Colors.green.shade600,
+         behavior: SnackBarBehavior.floating,
+         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+         margin: const EdgeInsets.all(10),
+       ),
+     );
+  }
+
+  // --- Percentage Widget ---
+  Widget _buildPercentageWidget(String? percentageString) {
+    // Use context safely within the State class
+    final headlineStyle = Theme.of(context).textTheme.headlineSmall;
+
+    // Handle null, "N/A", or empty strings
+    if (percentageString == null || percentageString == "N/A" || percentageString.isEmpty) {
+      return Text(
+        'N/A',
+        style: headlineStyle?.copyWith(
+          fontWeight: FontWeight.bold,
+          color: Colors.grey.shade500,
+        ),
+      );
+    }
+
+    double? percentageValue;
+    try {
+      percentageValue = double.parse(percentageString);
+    } catch (e) {
+      if (kDebugMode) print("Warning: Could not parse percentage string '$percentageString': $e");
+      return Text(
+        'ERR',
+        style: headlineStyle?.copyWith(
+          fontWeight: FontWeight.bold,
+          color: Colors.red.shade700,
+        ),
+      );
+    }
+
+    // Handle invalid numeric values
+    if (percentageValue < 0 || percentageValue.isNaN || percentageValue.isInfinite) {
+      if (kDebugMode) print("Warning: Invalid percentage value: $percentageValue");
+      return Text(
+        'ERR',
+        style: headlineStyle?.copyWith(
+          fontWeight: FontWeight.bold,
+          color: Colors.red.shade700,
+        ),
+      );
+    }
+
+    // Determine color based on percentage value
+    final Color percColor = percentageValue >= 75 ? Colors.green.shade600 :
+                             percentageValue >= 50 ? Colors.orange.shade700 :
+                             Colors.red.shade700;
+
+    // Display the percentage text
+    return Text(
+      '$percentageString%',
+      style: headlineStyle?.copyWith(
+        fontWeight: FontWeight.bold,
+        color: percColor,
+      ),
+    );
+  }
+
+
+  // --- Actions ---
+
+  // Join Lecture
   Future<void> _handleStudentJoin(Lecture lecture) async {
     final studentRegNum = widget.currentUser.registrationNumber;
     if (studentRegNum == null || studentRegNum.isEmpty) {
@@ -245,8 +312,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
-
-  // --- showJoinLectureDialog ---
   Future<void> showJoinLectureDialog(Lecture lecture) async {
      final studentRegNum = widget.currentUser.registrationNumber;
     if (studentRegNum == null || studentRegNum.isEmpty) {
@@ -261,8 +326,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
 
     final confirmed = await showDialog<bool>(
-      context: context, barrierDismissible: false,
-      builder: (dialogContext) {
+      context: context, // Use the State's context
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) { // Use a different context name
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
           title: Text('Confirm Join: ${lecture.unitName}'),
@@ -308,7 +374,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     if (confirmed == true && mounted) { await _handleStudentJoin(lecture); }
   }
 
-  // --- _scanLectureQrAndCheckIn ---
+  // Scan QR and Check In
   Future<void> _scanLectureQrAndCheckIn() async {
      if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
        showSnackBar('Error: Your registration number is missing. Cannot check in via QR.', isError: true); return;
@@ -316,119 +382,72 @@ class _StudentDashboardState extends State<StudentDashboard> {
     if (_processingLectureId != null) return;
 
     final String? scannedLectureId = await Navigator.push<String>( context, MaterialPageRoute(builder: (context) => const QrScannerScreen()), );
-    if (!mounted) return;
+    if (!mounted || scannedLectureId == null || scannedLectureId.isEmpty) {
+        if (kDebugMode && scannedLectureId != null) print("QR Scan cancelled or returned empty lecture ID.");
+        return;
+    }
 
-    if (scannedLectureId != null && scannedLectureId.isNotEmpty) {
-      if (kDebugMode) print("Scanned Lecture ID for Check-In: $scannedLectureId");
-      setState(() { _processingLectureId = scannedLectureId; });
-      try {
-        await apiService.checkInViaLectureQr(scannedLectureId);
-        if (!mounted) return;
-        await _loadAttendanceSummary();
+    if (kDebugMode) print("Scanned Lecture ID for Check-In: $scannedLectureId");
 
-        String lectureName = "lecture";
-        if (lecturesFuture != null) {
-           try {
-              final lectures = await lecturesFuture;
-              final Lecture? foundLecture = lectures?.firstWhereOrNull((l) => l.id == scannedLectureId);
-              if (foundLecture != null) { lectureName = "'${foundLecture.unitName}'"; }
-           } catch (_) { /* Ignore */ }
+    // Frontend Time Check
+    Lecture? scannedLecture;
+    if (lecturesFuture != null) {
+        try {
+            final lectures = await lecturesFuture;
+            scannedLecture = lectures?.firstWhereOrNull((l) => l.id == scannedLectureId);
+        } catch (e) {
+            if (kDebugMode) print("Error accessing lecturesFuture cache during QR scan check: $e");
         }
-        showSnackBar('Successfully checked in for $lectureName!', isError: false);
-      } catch (e) {
-        if (!mounted) return;
-        if (e is ApiException && (e.statusCode == 400 || e.statusCode == 404)) {
-           showSnackBar('Check-in failed: You must join the lecture first.', isError: true);
-        } else if (e is ApiException && e.statusCode == 409) {
-           showSnackBar('Check-in failed: You are already checked in.', isError: true);
-           await _loadAttendanceSummary();
+    }
+
+    if (scannedLecture != null) {
+        final lectureEndTime = scannedLecture.endTime;
+        if (lectureEndTime != null && DateTime.now().isAfter(lectureEndTime)) {
+            if (kDebugMode) print("Frontend Check: Lecture ${scannedLecture.unitName} has ended. Aborting check-in API call.");
+            showSnackBar('Cannot check in: Lecture "${scannedLecture.unitName}" has already ended.', isError: true);
+            return;
         } else {
-           showSnackBar('QR Check-in failed: ${e is ApiException ? e.message : e.toString()}', isError: true);
+             if (kDebugMode) print("Frontend Check: Lecture ${scannedLecture.unitName} end time (${lectureEndTime ?? 'null'}) is in the future or null. Proceeding.");
         }
-      } finally {
-        if (mounted) { setState(() { _processingLectureId = null; }); }
-      }
     } else {
-      if (kDebugMode) print("QR Scan cancelled or returned empty lecture ID.");
-    }
-  }
-
-  // --- showSnackBar ---
-  void showSnackBar(String message, {bool isError = false}) {
-      if (!mounted) return;
-     ScaffoldMessenger.of(context).showSnackBar(
-       SnackBar(
-         content: Text(message),
-         backgroundColor: isError ? Theme.of(context).colorScheme.error : Colors.green.shade600,
-         behavior: SnackBarBehavior.floating,
-         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-         margin: const EdgeInsets.all(10),
-       ),
-     );
-  }
-
-  // --- *** ADDED: Helper widget to display percentage (Adapted from lecture_attendance_screen) *** ---
-  Widget _buildPercentageWidget(String? percentageString) {
-    final headlineStyle = Theme.of(context).textTheme.headlineSmall;
-
-    // Handle null, "N/A", or empty strings
-    if (percentageString == null || percentageString == "N/A" || percentageString.isEmpty) {
-      // Display "N/A" using the headline style but with a neutral color
-      return Text(
-        'N/A',
-        style: headlineStyle?.copyWith(
-          fontWeight: FontWeight.bold,
-          color: Colors.grey.shade500, // Use a neutral color
-        ),
-      );
+        if (kDebugMode) print("Warning: Could not find lecture details locally for QR time check. Proceeding with API call (backend will verify time).");
     }
 
-    double? percentageValue;
+    // Proceed with API call
+    setState(() { _processingLectureId = scannedLectureId; });
     try {
-      percentageValue = double.parse(percentageString);
+      await apiService.checkInViaLectureQr(scannedLectureId);
+      if (!mounted) return;
+      await _loadAttendanceSummary();
+
+      String lectureName = scannedLecture?.unitName ?? "the lecture";
+      showSnackBar('Successfully checked in for \'$lectureName\'!', isError: false);
+
     } catch (e) {
-      if (kDebugMode) print("Warning: Could not parse percentage string '$percentageString': $e");
-      // Display "ERR" using the headline style with an error color
-      return Text(
-        'ERR', // Indicate error
-        style: headlineStyle?.copyWith(
-          fontWeight: FontWeight.bold,
-          color: Colors.red.shade700,
-        ),
-      );
+      if (!mounted) return;
+      if (e is ApiException) {
+          if (e.statusCode == 400 && e.message.toLowerCase().contains("lecture has already ended")) {
+              showSnackBar('Check-in failed: The lecture has already ended.', isError: true);
+          } else if (e.statusCode == 400 || e.statusCode == 404) {
+              showSnackBar('Check-in failed: You must join the lecture first.', isError: true);
+          } else if (e.statusCode == 409) {
+              showSnackBar('Check-in failed: You are already checked in.', isError: true);
+              await _loadAttendanceSummary();
+          } else {
+              showSnackBar('QR Check-in failed: ${e.message}', isError: true);
+          }
+      } else {
+          showSnackBar('QR Check-in failed: An unexpected error occurred.', isError: true);
+      }
+      if (kDebugMode) print("Error during checkInViaLectureQr API call: $e");
+    } finally {
+      if (mounted) { setState(() { _processingLectureId = null; }); }
     }
-
-    // Handle invalid numeric values
-    if (percentageValue < 0 || percentageValue.isNaN || percentageValue.isInfinite) {
-      if (kDebugMode) print("Warning: Invalid percentage value: $percentageValue");
-      // Display "ERR" using the headline style with an error color
-      return Text(
-        'ERR',
-        style: headlineStyle?.copyWith(
-          fontWeight: FontWeight.bold,
-          color: Colors.red.shade700,
-        ),
-      );
-    }
-
-    // Determine color based on percentage value
-    final Color percColor = percentageValue >= 75 ? Colors.green.shade600 :
-                             percentageValue >= 50 ? Colors.orange.shade700 :
-                             Colors.red.shade700;
-
-    // Display the percentage text using the headline style and calculated color
-    return Text(
-      '$percentageString%',
-      style: headlineStyle?.copyWith(
-        fontWeight: FontWeight.bold,
-        color: percColor, // Use the calculated color
-      ),
-    );
   }
-  // --- *** END Helper Widget *** ---
 
+  // --- UI Building ---
 
-  // --- _buildAttendanceSummaryCard ---
+  // Summary Card
   Widget _buildAttendanceSummaryCard() {
     if (_isLoadingSummary) {
       return const Padding(
@@ -471,11 +490,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
       );
     }
 
-    // --- Calculate progress bar values here, using the raw percentage string ---
+    // Calculate progress bar values
     double percentageValue = double.tryParse(_attendancePercentage!) ?? 0.0;
     double progressValue = (percentageValue / 100.0).clamp(0.0, 1.0);
     Color progressColor = percentageValue >= 75 ? Colors.green.shade600 : (percentageValue >= 50 ? Colors.orange.shade700 : Colors.red.shade600);
-    // --- End progress bar calculation ---
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -493,13 +511,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
               children: [
                 Flexible( child: Text( _totalLectures == 0 ? '0 / 0 Lectures Attended' : '$_attendedLectures / $_totalLectures Lectures Attended', style: Theme.of(context).textTheme.bodyMedium, overflow: TextOverflow.ellipsis, ), ),
                 const SizedBox(width: 10),
-                // *** MODIFIED: Use the helper widget to display the percentage ***
-                _buildPercentageWidget(_attendancePercentage),
-                // *** END MODIFICATION ***
+                _buildPercentageWidget(_attendancePercentage), // Use helper
               ],
             ),
             const SizedBox(height: 8),
-            ClipRRect( // Progress bar uses the color calculated above
+            ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
                 value: progressValue,
@@ -530,7 +546,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
          actions: [
             if (_processingLectureId != null)
               const Padding( padding: EdgeInsets.only(right: 15.0), child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))), ),
-
             IconButton(
               icon: Icon(Icons.refresh, color: canPerformActions ? Colors.white : Colors.white54),
               tooltip: 'Refresh Lectures & Summary',
@@ -540,8 +555,30 @@ class _StudentDashboardState extends State<StudentDashboard> {
               icon: const Icon(Icons.logout),
               tooltip: 'Logout',
               onPressed: (_processingLectureId != null) ? null : () async {
-                 final confirm = await showDialog<bool>( context: context, builder: (context) => AlertDialog( shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), title: const Text('Confirm Logout'), content: const Text('Are you sure you want to log out?'), actions: [ TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')), TextButton( onPressed: () => Navigator.of(context).pop(true), style: TextButton.styleFrom(foregroundColor: Colors.red), child: const Text('Logout'), ), ], ), ) ?? false;
-                 if (confirm && mounted) { await authService.logout(); Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, ); }
+                 // Ensure context and builder are correctly passed
+                 final confirm = await showDialog<bool>(
+                    context: context, // Pass the current BuildContext
+                    builder: (BuildContext dialogContext) { // Use a different context name
+                      return AlertDialog(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                        title: const Text('Confirm Logout'),
+                        content: const Text('Are you sure you want to log out?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')), // Use dialogContext
+                          TextButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(true), // Use dialogContext
+                            style: TextButton.styleFrom(foregroundColor: Colors.red),
+                            child: const Text('Logout'),
+                          ),
+                        ],
+                      );
+                    } // End builder
+                 ) ?? false; // Handle null case if dialog is dismissed
+                 if (confirm && mounted) {
+                    await authService.logout();
+                    // Use context from the State for navigation
+                    Navigator.pushAndRemoveUntil( context, MaterialPageRoute(builder: (context) => const WelcomeScreen()), (Route<dynamic> route) => false, );
+                 }
               },
             ),
          ],
@@ -586,12 +623,31 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     onRefresh: () async { loadLectures(); await _loadAttendanceSummary(); },
                     child: FutureBuilder<List<Lecture>>(
                       future: lecturesFuture,
-                      builder: (context, snapshot) {
+                      builder: (context, snapshot) { // *** START OF FutureBuilder builder ***
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           return Center(child: CircularProgressIndicator(color: brandColor));
                         }
+
+                        // *** UPDATED ERROR HANDLING BLOCK ***
                         if (snapshot.hasError) {
-                          return Center(
+                           // Log the error for debugging
+                           final error = snapshot.error;
+                           final stackTrace = snapshot.stackTrace;
+                           if (kDebugMode) {
+                             print("Error loading lectures: $error");
+                             print("Stack trace: $stackTrace");
+                           }
+                           // Display a user-friendly error message
+                           String displayMessage = 'Error loading lectures.';
+                           if (error is ApiException) {
+                             displayMessage = error.message; // Use message from ApiException
+                           } else if (error is TimeoutException) {
+                             displayMessage = 'Request timed out. Please check your connection.';
+                           } else {
+                             displayMessage = 'An unexpected error occurred.';
+                           }
+
+                           return Center(
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
                               child: Column(
@@ -599,16 +655,32 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                 children: [
                                   Icon(Icons.cloud_off_outlined, color: Colors.orange.shade700, size: 48),
                                   const SizedBox(height: 10),
-                                  Text( 'Error loading lectures for $fixedYearOfStudy/$fixedSemester:\n${snapshot.error}', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700), ),
+                                  Text(
+                                    '$displayMessage\n(Year: $fixedYearOfStudy, Sem: $fixedSemester)',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.grey.shade700),
+                                  ),
                                   const SizedBox(height: 15),
-                                  ElevatedButton.icon( icon: const Icon(Icons.refresh), label: const Text('Retry'), onPressed: loadLectures, style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white), )
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Retry'),
+                                    onPressed: loadLectures, // Retry loading lectures
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, foregroundColor: Colors.white),
+                                  ),
+                                   if (kDebugMode)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8.0),
+                                      child: Text('\nDetails: $error', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                                    ),
                                 ],
                               ),
                             )
                           );
                         }
+                        // *** END UPDATED ERROR HANDLING BLOCK ***
+
                         if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                          return LayoutBuilder( builder: (context, constraints) {
+                           return LayoutBuilder( builder: (context, constraints) {
                             return SingleChildScrollView(
                               physics: const AlwaysScrollableScrollPhysics(),
                               child: ConstrainedBox(
@@ -631,6 +703,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           });
                         }
 
+                        // --- Success State ---
                         final lectures = snapshot.data!;
                         lectures.sort((a, b) {
                            final aDate = a.lectureDate; final bDate = b.lectureDate;
@@ -649,7 +722,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
                         return ListView.builder(
                            physics: const AlwaysScrollableScrollPhysics(),
-                           padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 80),
+                           padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 80), // Added bottom padding for FAB
                            itemCount: lectures.length,
                            itemBuilder: (context, index) {
                               final lecture = lectures[index];
@@ -658,6 +731,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
                               final bool isCheckedIn = attendanceRecord != null && attendanceRecord.checkedIn;
                               final bool isCurrentlyProcessing = _processingLectureId == lecture.id;
                               final bool isOnlineWithLink = lecture.venue.toUpperCase() == 'ONLINE' && lecture.onlineLink != null && lecture.onlineLink!.trim().isNotEmpty;
+
+                              final lectureEndTime = lecture.endTime;
+                              final bool hasEnded = lectureEndTime != null && DateTime.now().isAfter(lectureEndTime);
 
                               String subtitleText = 'Lecturer: ${lecture.lecturerName}\n${lecture.formattedDate} | ${lecture.formattedStartTime} - ${lecture.formattedEndTime}\nVenue: ${lecture.venue}';
 
@@ -673,10 +749,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                       CircleAvatar(
                                         backgroundColor: brandColor.withOpacity(0.1),
                                         child: Icon(
+                                          (hasEnded && !isCheckedIn) ? Icons.event_busy_outlined :
                                           isCheckedIn ? Icons.check_circle_outline_rounded :
                                           (isJoined ? Icons.hourglass_bottom_rounded :
                                           (isOnlineWithLink ? Icons.videocam_outlined : Icons.schedule_outlined)),
-                                          color: brandColor,
+                                          color: (hasEnded && !isCheckedIn) ? Colors.grey.shade600 : brandColor,
                                           size: 24,
                                         ),
                                       ),
@@ -694,7 +771,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                               subtitleText,
                                               style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3),
                                             ),
-                                            if (isOnlineWithLink && (isJoined || isCheckedIn)) ...[
+                                            if (isOnlineWithLink && (isJoined || isCheckedIn || !hasEnded)) ...[
                                               const SizedBox(height: 8),
                                               TextButton.icon(
                                                 icon: Icon(Icons.open_in_browser_outlined, size: 18, color: brandColor),
@@ -705,14 +782,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                                   visualDensity: VisualDensity.compact,
                                                   alignment: Alignment.centerLeft,
                                                 ),
-                                                onPressed: () => _launchURL(lecture.onlineLink!),
+                                                onPressed: _processingLectureId != null ? null : () => _launchURL(lecture.onlineLink!),
                                               ),
                                             ]
                                           ],
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      if (isCheckedIn)
+
+                                      // Trailing Widget Logic
+                                      if (hasEnded && !isCheckedIn)
+                                        Chip(
+                                          avatar: Icon(Icons.event_busy, size: 18, color: Colors.grey.shade700),
+                                          label: Text('Ended', style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)),
+                                          backgroundColor: Colors.grey.shade200,
+                                          side: BorderSide.none,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        )
+                                      else if (isCheckedIn)
                                         Chip(
                                           avatar: Icon(Icons.check_circle, size: 18, color: Colors.green.shade800),
                                           label: Text('Checked In', style: TextStyle(color: Colors.green.shade900, fontWeight: FontWeight.w500)),
@@ -728,7 +815,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                           side: BorderSide.none,
                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                         )
-                                      else
+                                      else // Not joined, not checked in, not ended
                                         ElevatedButton(
                                           onPressed: (_processingLectureId != null || !canPerformActions) ? null : () => showJoinLectureDialog(lecture),
                                           style: ElevatedButton.styleFrom(
@@ -749,7 +836,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                               );
                            },
                         );
-                      },
+                      }, // *** END OF FutureBuilder builder ***
                     ),
                   )
                 : Center( // Placeholder when canPerformActions is false

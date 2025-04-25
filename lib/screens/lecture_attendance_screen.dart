@@ -1,6 +1,7 @@
 // lib/screens/lecture_attendance_screen.dart
 import 'dart:io';
 import 'dart:typed_data'; // Needed for Uint8List
+import 'dart:async'; // Needed for TimeoutException
 import 'dart:ui' as ui;
 
 import 'package:checkmate/models/lecture.dart';
@@ -347,7 +348,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
         // Use FutureBuilder to handle the asynchronous loading of attendance data
         child: FutureBuilder<List<AttendanceRecord>>(
           future: _attendanceFuture, // The future fetching the data
-          builder: (context, snapshot) {
+          builder: (context, snapshot) { // *** START OF FutureBuilder builder ***
             // --- Loading State ---
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator(color: LectureAttendanceScreen.brandColor));
@@ -356,11 +357,23 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
             // --- Error State ---
             if (snapshot.hasError) {
               // Log the error for debugging
+              final error = snapshot.error;
+              final stackTrace = snapshot.stackTrace;
               if (kDebugMode) {
-                print("Error loading attendance: ${snapshot.error}");
-                print("Error details: ${snapshot.error.runtimeType} ${snapshot.stackTrace}");
+                print("Error loading attendance: $error");
+                print("Stack trace: $stackTrace");
               }
-              // Display a user-friendly error message with retry option (via pull-to-refresh)
+              // Display a user-friendly error message
+              String displayMessage = 'Error loading attendance list.';
+              if (error is ApiException) {
+                displayMessage = error.message; // Use message from ApiException
+              } else if (error is TimeoutException) {
+                displayMessage = 'Request timed out. Please check your connection.';
+              } else {
+                // Generic message for other types of errors
+                displayMessage = 'An unexpected error occurred.';
+              }
+
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
@@ -370,7 +383,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                       Icon(Icons.error_outline, color: Colors.red.shade400, size: 48),
                       const SizedBox(height: 10),
                       Text(
-                        'Error loading attendance list.\nPlease check your connection and pull down to retry.',
+                        '$displayMessage\nPlease pull down to retry.', // Added retry instruction
                         textAlign: TextAlign.center,
                         style: TextStyle(color: Colors.grey.shade700)
                       ),
@@ -378,13 +391,14 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                       if (kDebugMode)
                         Padding(
                           padding: const EdgeInsets.only(top: 8.0),
-                          child: Text('\n${snapshot.error}', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                          child: Text('\nDetails: $error', style: TextStyle(fontSize: 10, color: Colors.grey)),
                         ),
                     ],
                   )
                 )
               );
             }
+            // *** END UPDATED ERROR HANDLING BLOCK ***
 
             // --- Empty State ---
             // Handle cases where data is null or the list is empty
@@ -482,11 +496,6 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                   statusIcon = Icons.hourglass_top_rounded; // Icon for 'Joined'
                 }
 
-                // Debug print to check percentage value from API
-                // if (kDebugMode) {
-                //   print("Record $index (${record.studentName}): Percentage value = '${record.percentage}', Type = ${record.percentage.runtimeType}");
-                // }
-
                 // Build the ListTile for each attendance record
                 return ListTile(
                   // Leading avatar with index number
@@ -536,7 +545,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                 );
               },
             );
-          },
+          }, // *** END OF FutureBuilder builder ***
         ),
       ),
     );

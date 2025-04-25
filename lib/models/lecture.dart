@@ -1,42 +1,53 @@
 // lib/models/lecture.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart'; // For immutable annotation
-// Removed unused Material import
+import 'package:flutter/foundation.dart'; // For kDebugMode and immutable annotation
 import 'package:intl/intl.dart';
 
-// --- Helper Functions (Keep as they are) ---
-DateTime? _parseDateTime(dynamic timestampData) {
-  // ... (no changes needed here)
+// --- Helper Functions ---
+
+// Helper to parse various date/time formats from API/Firestore into a UTC DateTime
+DateTime? _parseDateTimeToUtc(dynamic timestampData) {
   if (timestampData == null) return null;
   try {
     if (timestampData is Timestamp) {
-      return timestampData.toDate().toUtc();
+      return timestampData.toDate(); // Already UTC
     } else if (timestampData is String) {
       final dtIso = DateTime.tryParse(timestampData);
-      if (dtIso != null) return dtIso.toUtc();
+      if (dtIso != null) {
+        // *** ADDED LOGGING ***
+        if (kDebugMode) print("[ParseHelper] Parsed ISO '$timestampData' to DateTime (isUtc: ${dtIso.isUtc}): ${dtIso.toIso8601String()} -> UTC: ${dtIso.toUtc().toIso8601String()}");
+        return dtIso.toUtc(); // Ensure it's UTC
+      }
       DateTime? dtYmd;
       try {
         final parsedDate = DateFormat('yyyy-MM-dd').parseStrict(timestampData);
         dtYmd = DateTime.utc(parsedDate.year, parsedDate.month, parsedDate.day);
+        if (kDebugMode) print("[ParseHelper] Parsed YMD '$timestampData' to DateTime UTC: ${dtYmd.toIso8601String()}");
       } on FormatException { dtYmd = null; }
-      if (dtYmd != null) return dtYmd;
+      if (dtYmd != null) return dtYmd; // Already UTC
+
     } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
       final ts = Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
-      return ts.toDate().toUtc();
+      if (kDebugMode) print("[ParseHelper] Parsed Map Timestamp to DateTime UTC: ${ts.toDate().toIso8601String()}");
+      return ts.toDate(); // Already UTC
     } else if (timestampData is int) {
-      return DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
+      final dt = DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
+      if (kDebugMode) print("[ParseHelper] Parsed Int Epoch to DateTime UTC: ${dt.toIso8601String()}");
+      return dt;
     }
-  } catch (e) { if (kDebugMode) print("Error parsing DateTime: $timestampData, Error: $e"); }
-  if (kDebugMode) print("Unrecognized DateTime format: $timestampData");
+  } catch (e) { if (kDebugMode) print("[ParseHelper] Error parsing DateTime to UTC: $timestampData, Error: $e"); }
+  if (kDebugMode) print("[ParseHelper] Unrecognized DateTime format for UTC parsing: $timestampData");
   return null;
 }
+
+// Helper to convert a DateTime (assumed UTC) to an ISO 8601 UTC string
 String? _toIso8601UtcString(DateTime? dateTime) {
-  // ... (no changes needed here)
   if (dateTime == null) return null;
   return dateTime.toUtc().toIso8601String();
 }
+
+// Helper to convert a DateTime (assumed UTC) to 'YYYY-MM-DD' string
 String? _toDateOnlyIsoString(DateTime? dateTime) {
-  // ... (no changes needed here)
   if (dateTime == null) return null;
   return DateFormat('yyyy-MM-dd').format(dateTime.toUtc());
 }
@@ -56,14 +67,12 @@ class Lecture {
   final String semester;
   final String unitName;
   final String unitCode;
-  final DateTime? lectureDate;
-  final DateTime? startTime;
-  final DateTime? endTime;
+  final DateTime? lectureDate; // Store as DateTime (internally UTC after parsing)
+  final DateTime? startTime;   // Store as DateTime (internally UTC after parsing)
+  final DateTime? endTime;     // Store as DateTime (internally UTC after parsing)
   final String venue;
-  final DateTime? createdAt;
-  // --- ADDED: Online Link Field ---
+  final DateTime? createdAt;   // Store as DateTime (internally UTC after parsing)
   final String? onlineLink;
-  // --- END ADDED ---
 
   const Lecture({
     required this.id,
@@ -82,23 +91,43 @@ class Lecture {
     required this.endTime,
     required this.venue,
     this.createdAt,
-    // --- ADDED: To constructor ---
     this.onlineLink,
-    // --- END ADDED ---
   });
 
-  // --- Formatting Getters (Keep as they are) ---
-  String get formattedDate => lectureDate != null ? DateFormat.yMMMEd().format(lectureDate!.toLocal()) : 'N/A';
-  String get formattedStartTime => startTime != null ? DateFormat.jm().format(startTime!.toLocal()) : 'N/A';
-  String get formattedEndTime => endTime != null ? DateFormat.jm().format(endTime!.toLocal()) : 'N/A';
-  String get formattedCreatedAt => createdAt != null ? DateFormat.yMd().add_jm().format(createdAt!.toLocal()) : 'N/A';
+  // --- Formatting Getters ---
+  String get formattedDate {
+    final localDate = lectureDate?.toLocal();
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture Format] Formatting lectureDate (UTC: ${lectureDate?.toIso8601String()}) to Local: ${localDate?.toIso8601String()}");
+    return localDate != null ? DateFormat.yMMMEd().format(localDate) : 'N/A';
+  }
+  String get formattedStartTime {
+    final localStartTime = startTime?.toLocal();
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture Format] Formatting startTime (UTC: ${startTime?.toIso8601String()}) to Local: ${localStartTime?.toIso8601String()}");
+    return localStartTime != null ? DateFormat.jm().format(localStartTime) : 'N/A';
+  }
+  String get formattedEndTime {
+     final localEndTime = endTime?.toLocal();
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture Format] Formatting endTime (UTC: ${endTime?.toIso8601String()}) to Local: ${localEndTime?.toIso8601String()}");
+    return localEndTime != null ? DateFormat.jm().format(localEndTime) : 'N/A';
+  }
+  String get formattedCreatedAt {
+    final localCreatedAt = createdAt?.toLocal();
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture Format] Formatting createdAt (UTC: ${createdAt?.toIso8601String()}) to Local: ${localCreatedAt?.toIso8601String()}");
+    return localCreatedAt != null ? DateFormat.yMd().add_jm().format(localCreatedAt) : 'N/A';
+  }
   // --- End Formatting Getters ---
 
 
   // --- Firestore Conversion ---
   factory Lecture.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
-    return Lecture(
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture fromFirestore] Raw data: $data");
+    final lecture = Lecture(
       id: doc.id,
       lecturerId: data['lecturerId'] as String? ?? '',
       lecturerName: data['lecturerName'] as String? ?? 'N/A',
@@ -110,18 +139,20 @@ class Lecture {
       semester: data['semester'] as String? ?? '',
       unitName: data['unitName'] as String? ?? '',
       unitCode: data['unitCode'] as String? ?? '',
-      lectureDate: _parseDateTime(data['lectureDate']),
-      startTime: _parseDateTime(data['startTime']),
-      endTime: _parseDateTime(data['endTime']),
+      lectureDate: _parseDateTimeToUtc(data['lectureDate']), // Parse to UTC
+      startTime: _parseDateTimeToUtc(data['startTime']),     // Parse to UTC
+      endTime: _parseDateTimeToUtc(data['endTime']),         // Parse to UTC
       venue: data['venue'] as String? ?? '',
-      createdAt: _parseDateTime(data['createdAt']),
-      // --- ADDED: Parse from Firestore data ---
+      createdAt: _parseDateTimeToUtc(data['createdAt']),     // Parse to UTC
       onlineLink: data['onlineLink'] as String?,
-      // --- END ADDED ---
     );
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture fromFirestore] Parsed Lecture object: $lecture");
+    return lecture;
   }
 
   Map<String, dynamic> toFirestore() {
+    // When sending TO Firestore, convert the UTC DateTime objects to Firestore Timestamps
     return {
       'lecturerId': lecturerId,
       'lecturerName': lecturerName,
@@ -134,12 +165,10 @@ class Lecture {
       'unitName': unitName,
       'unitCode': unitCode,
       'venue': venue,
-      'lectureDate': lectureDate != null ? Timestamp.fromDate(lectureDate!) : null,
-      'startTime': startTime != null ? Timestamp.fromDate(startTime!) : null,
-      'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,
-      // --- ADDED: Include in Firestore data if not null ---
+      'lectureDate': lectureDate != null ? Timestamp.fromDate(lectureDate!) : null, // Assumes lectureDate is UTC
+      'startTime': startTime != null ? Timestamp.fromDate(startTime!) : null,       // Assumes startTime is UTC
+      'endTime': endTime != null ? Timestamp.fromDate(endTime!) : null,           // Assumes endTime is UTC
       if (onlineLink != null) 'onlineLink': onlineLink,
-      // --- END ADDED ---
       // 'createdAt' is usually set by the server
     };
   }
@@ -148,7 +177,9 @@ class Lecture {
 
   // --- API Conversion Methods ---
   factory Lecture.fromApiJson(Map<String, dynamic> json) {
-    return Lecture(
+    // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture fromApiJson] Raw JSON received: $json");
+    final lecture = Lecture(
       id: json['id'] as String? ?? json['_id'] as String? ?? '',
       lecturerId: json['lecturerId'] as String? ?? '',
       lecturerName: json['lecturerName'] as String? ?? 'N/A',
@@ -160,18 +191,20 @@ class Lecture {
       semester: json['semester'] as String? ?? '',
       unitName: json['unitName'] as String? ?? '',
       unitCode: json['unitCode'] as String? ?? '',
-      lectureDate: _parseDateTime(json['lectureDate']),
-      startTime: _parseDateTime(json['startTime']),
-      endTime: _parseDateTime(json['endTime']),
+      lectureDate: _parseDateTimeToUtc(json['lectureDate']), // Parse to UTC
+      startTime: _parseDateTimeToUtc(json['startTime']),     // Parse to UTC
+      endTime: _parseDateTimeToUtc(json['endTime']),         // Parse to UTC
       venue: json['venue'] as String? ?? '',
-      createdAt: _parseDateTime(json['createdAt']),
-      // --- ADDED: Parse from API JSON ---
+      createdAt: _parseDateTimeToUtc(json['createdAt']),     // Parse to UTC
       onlineLink: json['onlineLink'] as String?,
-      // --- END ADDED ---
     );
+     // *** ADDED LOGGING ***
+    if (kDebugMode) print("[Lecture fromApiJson] Parsed Lecture object: $lecture");
+    return lecture;
   }
 
   Map<String, dynamic> toApiJson() {
+    // When sending TO the API, use helpers that convert the UTC DateTime to specific string formats
     return {
       if (lecturerPhone != null) 'lecturerPhone': lecturerPhone,
       'school': school,
@@ -182,12 +215,10 @@ class Lecture {
       'unitName': unitName,
       'unitCode': unitCode,
       'venue': venue,
-      'lectureDate': _toDateOnlyIsoString(lectureDate),
-      'startTime': _toIso8601UtcString(startTime),
-      'endTime': _toIso8601UtcString(endTime),
-      // --- ADDED: Include in API JSON if not null ---
+      'lectureDate': _toDateOnlyIsoString(lectureDate), // Send as 'YYYY-MM-DD'
+      'startTime': _toIso8601UtcString(startTime),     // Send as ISO UTC string
+      'endTime': _toIso8601UtcString(endTime),         // Send as ISO UTC string
       if (onlineLink != null) 'onlineLink': onlineLink,
-      // --- END ADDED ---
       // 'createdAt' is usually set by the server
     };
   }
@@ -212,17 +243,13 @@ class Lecture {
     DateTime? endTime,
     String? venue,
     DateTime? createdAt,
-    // --- ADDED: onlineLink parameter ---
     String? onlineLink,
-    // --- END ADDED ---
     bool setLecturerPhoneNull = false,
     bool setLectureDateNull = false,
     bool setStartTimeNull = false,
     bool setEndTimeNull = false,
     bool setCreatedAtNull = false,
-    // --- ADDED: Flag for onlineLink ---
     bool setOnlineLinkNull = false,
-    // --- END ADDED ---
   }) {
     return Lecture(
       id: id ?? this.id,
@@ -241,17 +268,18 @@ class Lecture {
       endTime: setEndTimeNull ? null : (endTime ?? this.endTime),
       venue: venue ?? this.venue,
       createdAt: setCreatedAtNull ? null : (createdAt ?? this.createdAt),
-      // --- ADDED: Handle onlineLink in copyWith ---
       onlineLink: setOnlineLinkNull ? null : (onlineLink ?? this.onlineLink),
-      // --- END ADDED ---
     );
   }
 
   @override
   String toString() {
-    // Add onlineLink to toString if present
+    // Use formatting getters which handle nulls and local time conversion
     String linkInfo = onlineLink != null ? ', link: $onlineLink' : '';
-    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: ${_toDateOnlyIsoString(lectureDate)}, start: ${_toIso8601UtcString(startTime)}, end: ${_toIso8601UtcString(endTime)}, venue: $venue$linkInfo)';
+    // Also include UTC times for debugging
+    String utcStart = startTime != null ? startTime!.toUtc().toIso8601String() : 'null';
+    String utcEnd = endTime != null ? endTime!.toUtc().toIso8601String() : 'null';
+    return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: $formattedDate, start: $formattedStartTime (UTC: $utcStart), end: $formattedEndTime (UTC: $utcEnd), venue: $venue$linkInfo)';
   }
 
   @override
@@ -270,14 +298,12 @@ class Lecture {
       other.semester == semester &&
       other.unitName == unitName &&
       other.unitCode == unitCode &&
-      other.lectureDate == lectureDate &&
-      other.startTime == startTime &&
-      other.endTime == endTime &&
+      other.lectureDate == lectureDate && // Compare the underlying UTC DateTime objects
+      other.startTime == startTime &&     // Compare the underlying UTC DateTime objects
+      other.endTime == endTime &&         // Compare the underlying UTC DateTime objects
       other.venue == venue &&
-      other.createdAt == createdAt &&
-      // --- ADDED: Compare onlineLink ---
+      other.createdAt == createdAt &&     // Compare the underlying UTC DateTime objects
       other.onlineLink == onlineLink;
-      // --- END ADDED ---
   }
 
   @override
@@ -293,13 +319,11 @@ class Lecture {
         semester,
         unitName,
         unitCode,
-        lectureDate,
-        startTime,
-        endTime,
+        lectureDate, // Hash the underlying UTC DateTime objects
+        startTime,   // Hash the underlying UTC DateTime objects
+        endTime,     // Hash the underlying UTC DateTime objects
         venue,
-        createdAt,
-        // --- ADDED: Hash onlineLink ---
+        createdAt,   // Hash the underlying UTC DateTime objects
         onlineLink,
-        // --- END ADDED ---
       );
 }

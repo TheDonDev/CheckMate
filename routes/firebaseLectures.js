@@ -38,16 +38,18 @@ const ATTENDANCE_COLLECTION = 'attendance';
 const parseDateForFirestore = (dateInput) => {
   if (!dateInput) return null;
   try {
-    // Handles both 'YYYY-MM-DD' and full ISO strings like '2024-07-15T10:30:00.000Z'
+    // Handles both 'YYYY-MM-DD' and full ISO strings like '2024-07-15T10:30:00.000+03:00' or '...Z'
     const date = new Date(dateInput);
     if (isNaN(date.getTime())) {
-      console.warn(`Invalid date input received: ${dateInput}`);
+      console.warn(`[ParseHelper BE] Invalid date input received: ${dateInput}`);
       return null;
     }
+    // *** ADDED LOGGING ***
+    console.log(`[ParseHelper BE] Parsed input '${dateInput}' to JS Date: ${date.toISOString()} (UTC)`);
     // Firestore Admin SDK handles JS Date objects directly, converting them to Timestamps
     return date;
   } catch (e) {
-    console.error(`Error parsing date input "${dateInput}":`, e);
+    console.error(`[ParseHelper BE] Error parsing date input "${dateInput}":`, e);
     return null;
   }
 };
@@ -55,19 +57,26 @@ const parseDateForFirestore = (dateInput) => {
 // --- Helper Function for Timestamp Conversion (Firestore -> Client) ---
 const formatTimestampForClient = (timestamp) => {
   if (!timestamp) return null;
-  // Check if it's a Firestore Timestamp object
+  let dateObj = null;
   if (timestamp && typeof timestamp.toDate === 'function') {
-    return timestamp.toDate().toISOString(); // Convert to ISO string
+    dateObj = timestamp.toDate(); // Convert Firestore Timestamp to JS Date
+  } else if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
+    dateObj = timestamp; // Already a JS Date
   }
-  // Check if it's already a JavaScript Date object
-  if (timestamp instanceof Date && !isNaN(timestamp.getTime())) {
-    return timestamp.toISOString(); // Convert to ISO string
+
+  if (dateObj) {
+    const isoString = dateObj.toISOString(); // Convert to ISO string (UTC 'Z' format)
+    // *** ADDED LOGGING ***
+    console.log(`[FormatHelper BE] Formatting Timestamp/Date to ISO UTC string for client: ${isoString}`);
+    return isoString;
   }
-  // Handle case where it might already be an ISO string (e.g., from previous processing)
+
+  // Handle case where it might already be an ISO string (less likely from Firestore directly)
   if (typeof timestamp === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(timestamp)) {
-     return timestamp; // Return as is if it looks like an ISO string
+     console.log(`[FormatHelper BE] Timestamp was already string, returning as is: ${timestamp}`);
+     return timestamp;
   }
-  console.warn(`Could not format timestamp for client:`, timestamp);
+  console.warn(`[FormatHelper BE] Could not format timestamp for client:`, timestamp);
   return null; // Return null if format is unrecognized
 };
 
@@ -80,7 +89,7 @@ const formatDateTimeForSMS = (dateObj) => {
     return dateObj.toLocaleString('en-KE', { // Use appropriate locale like 'en-KE' for Kenya
         weekday: 'short', month: 'short', day: 'numeric',
         hour: 'numeric', minute: '2-digit', hour12: true,
-        // timeZone: 'Africa/Nairobi' // Optional: Explicitly set timezone if server/client differ
+        timeZone: 'Africa/Nairobi' // Explicitly set timezone for consistency in SMS
     });
 };
 
@@ -140,9 +149,7 @@ router.post('/', checkAuth, async (req, res) => {
     const {
       lecturerPhone, school, department, course, yearOfStudy, semester,
       unitName, unitCode, lectureDate, startTime, endTime, venue,
-      // --- ADDED: Extract onlineLink ---
       onlineLink
-      // --- END ADDED ---
     } = req.body;
 
     // Check for missing required fields
@@ -156,8 +163,8 @@ router.post('/', checkAuth, async (req, res) => {
 
     // Parse and validate dates/times
     const parsedLectureDate = parseDateForFirestore(lectureDate); // Expects 'YYYY-MM-DD' from client
-    const parsedStartTime = parseDateForFirestore(startTime);     // Expects ISO string from client
-    const parsedEndTime = parseDateForFirestore(endTime);         // Expects ISO string from client
+    const parsedStartTime = parseDateForFirestore(startTime);     // Expects ISO string (with offset) from client
+    const parsedEndTime = parseDateForFirestore(endTime);         // Expects ISO string (with offset) from client
     if (!parsedLectureDate || !parsedStartTime || !parsedEndTime) {
         console.error('Validation Error: Invalid date/time format received.');
         return res.status(400).json({ error: 'Invalid date or time format provided.' });
@@ -167,7 +174,7 @@ router.post('/', checkAuth, async (req, res) => {
         return res.status(400).json({ error: 'End time must be after start time.' });
     }
 
-    // --- ADDED: Validate onlineLink if venue is ONLINE ---
+    // Validate onlineLink if venue is ONLINE
     const formattedVenue = venue.trim(); // Use trimmed venue for check
     let finalOnlineLink = null; // Initialize link as null
 
@@ -186,7 +193,6 @@ router.post('/', checkAuth, async (req, res) => {
             return res.status(400).json({ error: 'Please provide a valid URL for the online lecture link (e.g., https://...).' });
         }
     }
-    // --- END ADDED ---
 
     // --- Prepare Lecture Data for Firestore ---
     const newLectureData = {
@@ -205,9 +211,7 @@ router.post('/', checkAuth, async (req, res) => {
       endTime: parsedEndTime,         // Store as JS Date (becomes Timestamp)
       venue: formattedVenue, // Store trimmed venue
       createdAt: admin.firestore.FieldValue.serverTimestamp(), // Let Firestore set creation time
-      // --- MODIFIED: Include finalOnlineLink (which is null if venue != ONLINE) ---
       onlineLink: finalOnlineLink,
-      // --- END MODIFIED ---
     };
     // --- End Prepare Data ---
 
@@ -221,7 +225,6 @@ router.post('/', checkAuth, async (req, res) => {
     const createdData = createdDoc.data();
     if (!createdData) {
         console.error(`Critical Error: Failed to fetch created lecture data for ID: ${createdLectureId}`);
-        // Don't stop execution, but SMS might fail or be inaccurate
     }
 
     // --- 2. Prepare and Send SMS Notifications (for CREATE) ---
@@ -243,10 +246,8 @@ router.post('/', checkAuth, async (req, res) => {
             } else {
                 console.log(`CREATE SMS: Found ${studentsSnapshot.size} potential student(s) for notification.`);
                 const smsStartTime = formatDateTimeForSMS(createdData.startTime.toDate());
-                // Include link in SMS if venue is ONLINE
                 let smsVenueInfo = `at ${createdData.venue}`;
                 if (createdData.venue.toUpperCase() === 'ONLINE' && createdData.onlineLink) {
-                    // Consider shortening link if necessary, but for now include full link
                     smsVenueInfo = `online. Link: ${createdData.onlineLink}`;
                 }
                 const smsMessageBody = `${smsSenderName} Alert: New lecture for ${createdData.unitName} (${createdData.unitCode}) by ${createdData.lecturerName} on ${smsStartTime} ${smsVenueInfo}.`;
@@ -298,10 +299,9 @@ router.post('/', checkAuth, async (req, res) => {
     // --- End SMS Logic for CREATE ---
 
     // --- 3. Return the success response to the client ---
-    // Ensure the response data includes the ID and formatted timestamps
     const responseData = createdData ? {
         id: createdDoc.id,
-        ...createdData, // Includes onlineLink if present
+        ...createdData,
         lectureDate: formatTimestampForClient(createdData.lectureDate),
         startTime: formatTimestampForClient(createdData.startTime),
         endTime: formatTimestampForClient(createdData.endTime),
@@ -347,7 +347,7 @@ router.get('/lecturer/:lecturerId', checkAuth, async (req, res) => {
             const data = doc.data();
             return {
                 id: doc.id,
-                ...data, // Includes onlineLink if present
+                ...data,
                 lectureDate: formatTimestampForClient(data.lectureDate),
                 startTime: formatTimestampForClient(data.startTime),
                 endTime: formatTimestampForClient(data.endTime),
@@ -445,7 +445,7 @@ router.get('/student', checkAuth, async (req, res) => {
         const data = doc.data();
         return {
             id: doc.id,
-            ...data, // Includes onlineLink if present
+            ...data,
             lectureDate: formatTimestampForClient(data.lectureDate),
             startTime: formatTimestampForClient(data.startTime),
             endTime: formatTimestampForClient(data.endTime),
@@ -497,7 +497,7 @@ router.get('/', checkAuth, async (req, res) => {
         const data = doc.data();
         return {
             id: doc.id,
-            ...data, // Includes onlineLink if present
+            ...data,
             lectureDate: formatTimestampForClient(data.lectureDate),
             startTime: formatTimestampForClient(data.startTime),
             endTime: formatTimestampForClient(data.endTime),
@@ -530,7 +530,7 @@ router.get('/:lectureId', checkAuth, async (req, res) => {
       console.log(`Found lecture for ID: ${lectureId}`);
       res.json({
           id: doc.id,
-          ...data, // Includes onlineLink if present
+          ...data,
           lectureDate: formatTimestampForClient(data.lectureDate),
           startTime: formatTimestampForClient(data.startTime),
           endTime: formatTimestampForClient(data.endTime),
@@ -557,14 +557,15 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
         return res.status(400).json({ message: 'Lecture ID is required.' });
     }
 
-    console.log(`Attempting to update lecture ${lectureId} by user ${authenticatedUserId}`);
+    console.log(`[BE Update ${lectureId}] Attempting update by user ${authenticatedUserId}`);
+    console.log(`[BE Update ${lectureId}] Received update data:`, updateData); // Log incoming data
 
     try {
         const lectureRef = db.collection(LECTURES_COLLECTION).doc(lectureId);
         const lectureDoc = await lectureRef.get();
 
         if (!lectureDoc.exists) {
-            console.log(`Update failed: Lecture ${lectureId} not found.`);
+            console.log(`[BE Update ${lectureId}] Update failed: Lecture not found.`);
             return res.status(404).json({ message: 'Lecture not found.' });
         }
 
@@ -576,82 +577,67 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
         const isAdmin = userRole === 'admin';
 
         if (lectureData.lecturerId !== authenticatedUserId && !isAdmin) {
-            console.warn(`Unauthorized update attempt: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}) tried to update lecture ${lectureId} owned by ${lectureData.lecturerId}`);
+            console.warn(`[BE Update ${lectureId}] Unauthorized update attempt: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}) tried to update lecture owned by ${lectureData.lecturerId}`);
             return res.status(403).json({ message: 'Forbidden: You do not have permission to update this lecture.' });
         }
-        console.log(`Authorization successful for update: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}) updating lecture ${lectureId}.`);
+        console.log(`[BE Update ${lectureId}] Authorization successful: User ${authenticatedUserId} (Role: ${userRole || 'N/A'}).`);
         // --- END AUTHORIZATION CHECK ---
 
         // --- VALIDATE AND PREPARE UPDATE DATA ---
         const allowedUpdates = {};
-        // --- ADDED: onlineLink to editable fields ---
         const editableFields = ['unitName', 'unitCode', 'venue', 'yearOfStudy', 'semester', 'lectureDate', 'startTime', 'endTime', 'onlineLink'];
-        // --- END ADDED ---
 
         for (const field of editableFields) {
-            // Check if the field exists in the incoming request body
             if (updateData.hasOwnProperty(field)) {
                 if (field === 'lectureDate' || field === 'startTime' || field === 'endTime') {
-                    const parsedDate = parseDateForFirestore(updateData[field]);
-                    // If parsing fails BUT the input wasn't explicitly null, it's an invalid format
+                    // Use the helper which handles ISO strings with offsets
+                    const parsedDate = parseDateForFirestore(updateData[field]); // This logs internally now
                     if (!parsedDate && updateData[field] != null) {
-                         console.error(`Validation Error during update: Invalid date format for ${field}: ${updateData[field]}`);
+                         console.error(`[BE Update ${lectureId}] Validation Error: Invalid date format for ${field}: ${updateData[field]}`);
                          return res.status(400).json({ error: `Invalid date format provided for ${field}. Expected YYYY-MM-DD or ISO string.` });
                     }
                     allowedUpdates[field] = parsedDate; // Store the parsed JS Date or null
                 }
-                // --- ADDED: Handle onlineLink trim/null ---
                 else if (field === 'onlineLink') {
-                    // Store trimmed link or null if empty/null
                     allowedUpdates[field] = updateData[field]?.trim() || null;
                 }
-                // --- END ADDED ---
                 else if (['unitCode', 'yearOfStudy', 'semester'].includes(field)) {
-                     // Use formatStringForQuery which handles null/undefined safely
                      allowedUpdates[field] = formatStringForQuery(updateData[field]);
                 }
                 else if (typeof updateData[field] === 'string') {
                     allowedUpdates[field] = updateData[field].trim();
                 }
                  else {
-                     // Keep other types (like null, numbers if any) as is
                      allowedUpdates[field] = updateData[field];
                  }
             }
         }
 
-        // --- ADDED: Validate onlineLink based on FINAL venue ---
+        // Validate onlineLink based on FINAL venue
         const finalVenue = allowedUpdates.hasOwnProperty('venue') ? allowedUpdates.venue : lectureData.venue;
         const finalOnlineLink = allowedUpdates.hasOwnProperty('onlineLink') ? allowedUpdates.onlineLink : lectureData.onlineLink;
 
         if (finalVenue?.toUpperCase() === 'ONLINE') {
             if (!finalOnlineLink || finalOnlineLink.trim().length === 0) {
-                console.error('Validation Error update: Online link required for ONLINE venue.');
+                console.error(`[BE Update ${lectureId}] Validation Error: Online link required for ONLINE venue.`);
                 return res.status(400).json({ error: 'Online lecture link is required when venue is set to ONLINE.' });
             }
-            // Optional: URL validation for the final link
-            try {
-                new URL(finalOnlineLink.trim());
-            } catch (_) {
-                console.error('Validation Error update: Invalid URL format for online link.');
+            try { new URL(finalOnlineLink.trim()); } catch (_) {
+                console.error(`[BE Update ${lectureId}] Validation Error: Invalid URL format for online link.`);
                 return res.status(400).json({ error: 'Please provide a valid URL for the online lecture link.' });
             }
         }
-        // If venue is NOT online, ensure link is nullified
-        // Only set to null if 'venue' was actually part of the update and changed away from ONLINE
-        // Or if 'onlineLink' was explicitly provided as null/empty when venue is not ONLINE
         if (finalVenue?.toUpperCase() !== 'ONLINE' && (allowedUpdates.hasOwnProperty('venue') || allowedUpdates.hasOwnProperty('onlineLink'))) {
-             allowedUpdates.onlineLink = null; // Explicitly set to null
+             allowedUpdates.onlineLink = null;
         }
-        // --- END ADDED ---
-
 
         // Validate start/end time
-        const finalStartTime = allowedUpdates.hasOwnProperty('startTime') ? allowedUpdates.startTime : lectureData.startTime?.toDate();
-        const finalEndTime = allowedUpdates.hasOwnProperty('endTime') ? allowedUpdates.endTime : lectureData.endTime?.toDate();
+        // Use .getTime() for comparison after ensuring they are Date objects
+        const finalStartTimeMs = allowedUpdates.hasOwnProperty('startTime') ? allowedUpdates.startTime?.getTime() : lectureData.startTime?.toDate().getTime();
+        const finalEndTimeMs = allowedUpdates.hasOwnProperty('endTime') ? allowedUpdates.endTime?.getTime() : lectureData.endTime?.toDate().getTime();
 
-        if (finalStartTime && finalEndTime && finalEndTime <= finalStartTime) {
-             console.error('Validation Error during update: End time must be after start time.');
+        if (finalStartTimeMs != null && finalEndTimeMs != null && finalEndTimeMs <= finalStartTimeMs) {
+             console.error(`[BE Update ${lectureId}] Validation Error: End time must be after start time.`);
              return res.status(400).json({ error: 'End time must be after start time.' });
         }
         // --- END VALIDATION ---
@@ -659,26 +645,28 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
 
         // --- Perform Update in Firestore ---
         if (Object.keys(allowedUpdates).length > 0) {
+            console.log(`[BE Update ${lectureId}] Applying updates to Firestore:`, allowedUpdates); // Log data being sent to Firestore
             await lectureRef.update(allowedUpdates);
-            console.log(`Lecture ${lectureId} updated successfully with fields:`, Object.keys(allowedUpdates));
+            console.log(`[BE Update ${lectureId}] Lecture updated successfully with fields:`, Object.keys(allowedUpdates));
         } else {
-            console.log(`No valid fields provided for update on lecture ${lectureId}.`);
+            console.log(`[BE Update ${lectureId}] No valid fields provided for update.`);
         }
         // --- End Firestore Update ---
 
         // --- Fetch Updated Data ---
-        const updatedDoc = await lectureRef.get(); // Fetch again to get latest data
-        const updatedLecture = updatedDoc.data(); // This now contains the merged updated data
+        const updatedDoc = await lectureRef.get();
+        const updatedLecture = updatedDoc.data();
         if (!updatedLecture) {
-             console.error(`Critical Error: Failed to fetch updated lecture data after update for ID: ${lectureId}`);
-             // Proceed to send response, but SMS might fail
+             console.error(`[BE Update ${lectureId}] Critical Error: Failed to fetch updated lecture data after update.`);
+        } else {
+             console.log(`[BE Update ${lectureId}] Fetched updated lecture data successfully.`);
         }
         // --- End Fetch Updated Data ---
 
 
         // --- Prepare and Send SMS Notifications (for UPDATE) ---
         if (twilioClient && updatedLecture) {
-            console.log(`Preparing to send UPDATE SMS notifications for lecture ${lectureId}...`);
+            console.log(`[BE Update ${lectureId}] Preparing to send UPDATE SMS notifications...`);
             console.log('--- Querying Students With Criteria (Using UPDATED values) ---');
             console.log(`Role: 'student', School: '${updatedLecture.school}', Dept: '${updatedLecture.department}', Course: '${updatedLecture.course}', Year: '${updatedLecture.yearOfStudy}', Sem: '${updatedLecture.semester}', Verified: true`);
 
@@ -694,14 +682,13 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
             try {
                 const studentsSnapshot = await studentsQuery.get();
                 if (studentsSnapshot.empty) {
-                    console.log(`UPDATE SMS: No matching students found for lecture ${lectureId}.`);
+                    console.log(`[BE Update ${lectureId}] UPDATE SMS: No matching students found.`);
                 } else {
-                    console.log(`UPDATE SMS: Found ${studentsSnapshot.size} potential student(s) for notification.`);
+                    console.log(`[BE Update ${lectureId}] UPDATE SMS: Found ${studentsSnapshot.size} potential student(s) for notification.`);
                     const smsStartTime = formatDateTimeForSMS(updatedLecture.startTime.toDate());
-                    // Include link in SMS if venue is ONLINE
                     let smsVenueInfo = `at ${updatedLecture.venue}`;
                     if (updatedLecture.venue.toUpperCase() === 'ONLINE' && updatedLecture.onlineLink) {
-                        smsVenueInfo = `online. Link: ${updatedLecture.onlineLink}`; // Consider shortening link
+                        smsVenueInfo = `online. Link: ${updatedLecture.onlineLink}`;
                     }
                     const smsMessageBody = `${smsSenderName} Update: Lecture for ${updatedLecture.unitName} (${updatedLecture.unitCode}) by ${updatedLecture.lecturerName} is now scheduled for ${smsStartTime} ${smsVenueInfo}.`;
                     const smsPromises = [];
@@ -721,38 +708,40 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
                                 .catch(error => ({ status: 'rejected', error: error.message, phone: studentPhoneNumber, code: error.code }))
                             );
                         } else {
-                            console.warn(`UPDATE SMS: Skipping student ${studentId}: Invalid phone ('${studentPhoneNumber}')`);
+                            console.warn(`[BE Update ${lectureId}] UPDATE SMS: Skipping student ${studentId}: Invalid phone ('${studentPhoneNumber}')`);
                         }
                     });
 
                     if (smsPromises.length > 0) {
-                        console.log(`UPDATE SMS: Attempting to send ${smsPromises.length} messages...`);
+                        console.log(`[BE Update ${lectureId}] UPDATE SMS: Attempting to send ${smsPromises.length} messages...`);
                         const results = await Promise.allSettled(smsPromises);
                         const successfulSends = results.filter(r => r.status === 'fulfilled').length;
                         const failedSends = results.filter(r => r.status === 'rejected').length;
-                        console.log(`UPDATE SMS: Sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
+                        console.log(`[BE Update ${lectureId}] UPDATE SMS: Sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
                         results.filter(r => r.status === 'rejected').forEach(failure => {
-                             console.warn(` -> UPDATE SMS Failed Detail: Phone: ${failure.reason.phone}, Code: ${failure.reason.code || 'N/A'}, Error: ${failure.reason.error}`);
+                             console.warn(` -> [BE Update ${lectureId}] UPDATE SMS Failed Detail: Phone: ${failure.reason.phone}, Code: ${failure.reason.code || 'N/A'}, Error: ${failure.reason.error}`);
                         });
                     } else {
-                         console.log("UPDATE SMS: No valid student phone numbers found.");
+                         console.log(`[BE Update ${lectureId}] UPDATE SMS: No valid student phone numbers found.`);
                     }
                 }
             } catch (smsQueryError) {
-                console.error(`UPDATE SMS: Error querying students or sending SMS for lecture ${lectureId}:`, smsQueryError);
+                console.error(`[BE Update ${lectureId}] UPDATE SMS: Error querying students or sending SMS:`, smsQueryError);
                  if (smsQueryError.code === 'failed-precondition' || (smsQueryError.message && smsQueryError.message.includes('index'))) {
-                     console.error("UPDATE SMS: Firestore Index Missing for Student Query.");
+                     console.error("[BE Update ${lectureId}] UPDATE SMS: Firestore Index Missing for Student Query.");
                  }
             }
         } else if (!twilioClient) {
-            console.warn(`Twilio client not initialized. Skipping UPDATE SMS notifications for lecture ${lectureId}.`);
+            console.warn(`[BE Update ${lectureId}] Twilio client not initialized. Skipping UPDATE SMS notifications.`);
         } else if (!updatedLecture) {
-             console.warn(`Updated lecture data was unavailable. Skipping UPDATE SMS notifications for lecture ${lectureId}.`);
+             console.warn(`[BE Update ${lectureId}] Updated lecture data was unavailable. Skipping UPDATE SMS notifications.`);
         }
         // --- END SMS Logic for UPDATE ---
 
 
         // --- Return Success Response ---
+        // Ensure the response uses the helper to format timestamps correctly for the client
+        console.log(`[BE Update ${lectureId}] Sending success response to client.`);
         res.status(200).json({
             id: updatedDoc.id,
             ...(updatedLecture || {}), // Send empty object if fetch failed
@@ -763,7 +752,7 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
         });
 
     } catch (error) {
-        console.error(`Error updating lecture ${lectureId}:`, error);
+        console.error(`[BE Update ${lectureId}] Error updating lecture:`, error);
         console.error('Error Stack:', error.stack);
         res.status(500).json({
             message: 'Internal server error while updating lecture.',

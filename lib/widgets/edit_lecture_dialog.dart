@@ -1,10 +1,12 @@
 // lib/widgets/edit_lecture_dialog.dart
 import 'package:checkmate/models/lecture.dart';
-import 'package:checkmate/services/api_service.dart';
+import 'package:checkmate/services/api_service.dart'; // Import ApiService
+import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:checkmate/constants/dropdown_data.dart';
+import 'dart:async'; // Needed for TimeoutException
 
 // --- UpperCaseTextFormatter (Keep as is) ---
 class UpperCaseTextFormatter extends TextInputFormatter {
@@ -34,9 +36,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
 
   late TextEditingController _unitNameController;
   late TextEditingController _unitCodeController;
-  // --- ADDED: Controller for online link ---
   late TextEditingController _onlineLinkController;
-  // --- END ADDED ---
 
   String? _selectedYear;
   String? _selectedSemester;
@@ -53,9 +53,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
 
     _unitNameController = TextEditingController(text: widget.lecture.unitName);
     _unitCodeController = TextEditingController(text: widget.lecture.unitCode);
-    // --- ADDED: Initialize online link controller ---
     _onlineLinkController = TextEditingController(text: widget.lecture.onlineLink ?? '');
-    // --- END ADDED ---
 
     _selectedYear = yearsList.contains(widget.lecture.yearOfStudy) ? widget.lecture.yearOfStudy : null;
     _selectedSemester = semestersList.contains(widget.lecture.semester) ? widget.lecture.semester : null;
@@ -69,15 +67,19 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
     _selectedEndTime = widget.lecture.endTime != null
         ? TimeOfDay.fromDateTime(widget.lecture.endTime!.toLocal())
         : TimeOfDay.fromDateTime(DateTime.now().add(const Duration(hours: 1)));
+
+    if (kDebugMode) {
+      print("[EditDialog Init] Initial Start Time (Local): $_selectedStartTime");
+      print("[EditDialog Init] Initial End Time (Local): $_selectedEndTime");
+      print("[EditDialog Init] Initial Date (Local): $_selectedDate");
+    }
   }
 
   @override
   void dispose() {
     _unitNameController.dispose();
     _unitCodeController.dispose();
-    // --- ADDED: Dispose online link controller ---
     _onlineLinkController.dispose();
-    // --- END ADDED ---
     super.dispose();
   }
 
@@ -142,7 +144,10 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       },
     );
     if (picked != null && picked != _selectedDate) {
-      setState(() { _selectedDate = picked; });
+      setState(() {
+        _selectedDate = picked;
+        if (kDebugMode) print("[EditDialog] Date Selected (Local): $_selectedDate");
+      });
     }
   }
 
@@ -172,51 +177,70 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       setState(() {
         if (isStartTime) {
           _selectedStartTime = picked;
+          if (kDebugMode) print("[EditDialog] Start Time Selected (Local): $_selectedStartTime");
           // Reset end time if it becomes invalid
            final startMinutes = _selectedStartTime.hour * 60 + _selectedStartTime.minute;
            final endMinutes = _selectedEndTime.hour * 60 + _selectedEndTime.minute;
            if(endMinutes <= startMinutes) {
-              _selectedEndTime = TimeOfDay(hour: (startMinutes + 60) ~/ 60, minute: (startMinutes + 60) % 60); // Default to 1 hour after start
+              // Calculate end time ensuring it wraps around midnight correctly if needed
+              final newEndMinute = (startMinutes + 60) % (24 * 60); // Add 60 minutes, wrap around 24 hours
+              _selectedEndTime = TimeOfDay(hour: newEndMinute ~/ 60, minute: newEndMinute % 60);
+              if (kDebugMode) print("[EditDialog] End Time Auto-Adjusted (Local): $_selectedEndTime");
            }
-                } else {
+        } else {
           _selectedEndTime = picked;
+          if (kDebugMode) print("[EditDialog] End Time Selected (Local): $_selectedEndTime");
         }
       });
+      // Re-validate the form to check time order immediately after selection
+      _formKey.currentState?.validate();
     }
   }
 
   // Method to handle form submission for update
   Future<void> _updateLecture() async {
-    // --- MODIFIED: Check form validity FIRST ---
     if (!_formKey.currentState!.validate()) {
       _showValidationError('Please fill in all required fields correctly.');
-      return; // Stop if basic validation fails
+      return;
     }
-    // --- END MODIFIED ---
 
-    // Check other selections
     if (_selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
        _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
     }
 
-    // Combine Date and Time into DateTime objects (using UTC for consistency with backend)
-    final DateTime startDateTime = DateTime.utc(
+    // *** Use local DateTime constructor ***
+    final DateTime startDateTime = DateTime( // Use local constructor
       _selectedDate.year, _selectedDate.month, _selectedDate.day,
       _selectedStartTime.hour, _selectedStartTime.minute,
     );
-    final DateTime endDateTime = DateTime.utc(
+    final DateTime endDateTime = DateTime( // Use local constructor
       _selectedDate.year, _selectedDate.month, _selectedDate.day,
       _selectedEndTime.hour, _selectedEndTime.minute,
     );
 
-    // Validate time order
+    if (kDebugMode) {
+      print("[EditDialog Update] Combined Start DateTime (Local): ${startDateTime.toIso8601String()}");
+      print("[EditDialog Update] Combined End DateTime (Local): ${endDateTime.toIso8601String()}");
+    }
+
+    // Validate time order (using local times is fine here)
     if (!endDateTime.isAfter(startDateTime)) {
       _showValidationError('End time must be after start time.');
       return;
     }
 
-  
+    // Handle online link based on venue
     String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
+    // Additional validation for online link if venue is ONLINE
+    if (_selectedVenue == 'ONLINE' && (onlineLinkValue == null || onlineLinkValue.isEmpty)) {
+       _showValidationError('Online link is required for ONLINE venue.'); return;
+    }
+    if (_selectedVenue == 'ONLINE' && onlineLinkValue != null) {
+        final uri = Uri.tryParse(onlineLinkValue);
+        if (uri == null || !uri.hasAbsolutePath || !uri.hasScheme || !(uri.isScheme('http') || uri.isScheme('https'))) {
+           _showValidationError('Please enter a valid URL for the online link (e.g., https://...).'); return;
+        }
+    }
 
 
     setState(() => _isLoading = true);
@@ -228,20 +252,23 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       'venue': _selectedVenue,
       'yearOfStudy': _selectedYear,
       'semester': _selectedSemester,
-      // Send dates/times in ISO 8601 format (UTC) as expected by backend
-      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), // Date only part
-      'startTime': startDateTime.toIso8601String(),
-      'endTime': endDateTime.toIso8601String(),
-      // 'course' is usually not editable here, but send it if backend needs it
-      // 'course': widget.lecture.course,
+      // Send dates/times in ISO 8601 format with offset.
+      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), // Keep date only part if needed separately
+      'startTime': startDateTime.toIso8601String(), // Includes offset
+      'endTime': endDateTime.toIso8601String(),     // Includes offset
       'onlineLink': onlineLinkValue,
     };
 
+    // *** ADDED LOGGING: Log data being sent ***
+    if (kDebugMode) {
+      print("[EditDialog Update] Sending update data to API: $updatedData");
+    }
+    // *** END LOGGING ***
+
     try {
       await apiService.updateLecture(widget.lecture.id, updatedData);
-      if (mounted) { Navigator.of(context).pop(true); } // Success
+      if (mounted) { Navigator.of(context).pop(true); } // Success, return true
     } catch (e, stackTrace) {
-      // Log detailed error information
       print("--- Update Lecture Error ---");
       print("Error Type: ${e.runtimeType}");
       print("Error Details: $e");
@@ -249,15 +276,13 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       print("StackTrace: $stackTrace");
       print("--- End Update Lecture Error ---");
 
-      // Show error message to the user
       if (mounted) {
-        String displayMessage = (e is ApiException) ? e.message : e.toString();
+        String displayMessage = (e is ApiException) ? e.message : "An unexpected error occurred during update.";
         _showValidationError('Failed to update lecture: $displayMessage');
       }
     } finally {
       if (mounted) { setState(() => _isLoading = false); }
     }
-    // Removed redundant else block
   }
 
   // Helper to show validation error snackbar
