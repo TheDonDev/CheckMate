@@ -89,7 +89,7 @@ router.get('/:userId', checkAuth, async (req, res) => {
       const data = doc.data();
       res.json({
         id: doc.id, // Document ID (UID)
-        uid: data.uid, // Include uid field if stored explicitly
+        uid: data.uid,
         name: data.name,
         email: data.email,
         phoneNumber: data.phoneNumber,
@@ -102,7 +102,7 @@ router.get('/:userId', checkAuth, async (req, res) => {
         semester: data.semester,
         isVerified: data.isVerified,
         createdAt: formatTimestamp(data.createdAt),
-        // Add other fields as needed
+       
       });
     }
   } catch (error) {
@@ -114,11 +114,5 @@ router.get('/:userId', checkAuth, async (req, res) => {
     });
   }
 });
-
-// --- NO /register or /login endpoints needed here ---
-// Registration and Login are handled by the Flutter client (AuthService)
-// interacting directly with Firebase Authentication.
-// The user document in Firestore ('users' collection) is created
-// within the AuthService.signUp method after successful Firebase Auth user creation.
 
 module.exports = router;
