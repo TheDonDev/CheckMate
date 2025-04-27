@@ -1,13 +1,15 @@
 // lib/widgets/create_lecture_dialog.dart
+import 'dart:convert'; // Import for jsonEncode
 import 'package:checkmate/constants/dropdown_data.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/api_service.dart';
+import 'package:flutter/foundation.dart'; // Import kDebugMode
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
-// --- Custom Input Formatter to force uppercase input ---
+// --- UpperCaseTextFormatter ---
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -21,10 +23,7 @@ class UpperCaseTextFormatter extends TextInputFormatter {
 
 class CreateLectureDialog extends StatefulWidget {
   final app_user.User currentUser;
-
-  // Define the brand color
   static const Color brandColor = Color(0xFF0175C2);
-
   const CreateLectureDialog({super.key, required this.currentUser});
 
   @override
@@ -35,32 +34,29 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   final _formKey = GlobalKey<FormState>();
   final _apiService = ApiService();
 
-  // Text editing controllers
+  // Controllers
   final _lecturerPhoneController = TextEditingController();
   final _unitNameController = TextEditingController();
   final _unitCodeController = TextEditingController();
   final _onlineLinkController = TextEditingController();
 
-  // State variables for dropdowns and pickers
+  // State variables
   String? _selectedYear;
   String? _selectedSemester;
   String? _selectedVenue;
   DateTime? _selectedDate;
-  TimeOfDay? _selectedStartTime; // Keep as TimeOfDay for picker state
-  TimeOfDay? _selectedEndTime;   // Keep as TimeOfDay for picker state
-
+  TimeOfDay? _selectedStartTime;
+  TimeOfDay? _selectedEndTime;
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // Pre-fill lecturer's phone if available
     _lecturerPhoneController.text = widget.currentUser.phoneNumber ?? '';
   }
 
   @override
   void dispose() {
-    // Dispose controllers to free up resources
     _lecturerPhoneController.dispose();
     _unitNameController.dispose();
     _unitCodeController.dispose();
@@ -68,8 +64,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     super.dispose();
   }
 
-  // Helper for consistent InputDecoration styling
   InputDecoration _inputDecoration(String label, {String? hint, Widget? prefixIcon, bool isRequired = true}) {
+     // ... (input decoration code remains the same) ...
     return InputDecoration(
       labelText: '$label${isRequired ? " *" : ""}',
       hintText: hint,
@@ -103,8 +99,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     );
   }
 
-  // Method to show the date picker
   Future<void> _pickDate() async {
+     // ... (date picker code remains the same) ...
     final DateTime now = DateTime.now();
     final DateTime today = DateTime(now.year, now.month, now.day);
 
@@ -133,8 +129,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     }
   }
 
-  // Method to show the time picker
   Future<void> _pickTime(bool isStartTime) async {
+     // ... (time picker code remains the same) ...
     final TimeOfDay initialTime = isStartTime
         ? (_selectedStartTime ?? TimeOfDay.now())
         : (_selectedEndTime ?? TimeOfDay.fromDateTime(DateTime.now().add(const Duration(hours: 1))));
@@ -167,7 +163,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
              final startMinutes = _selectedStartTime!.hour * 60 + _selectedStartTime!.minute;
              final endMinutes = _selectedEndTime!.hour * 60 + _selectedEndTime!.minute;
              if(endMinutes <= startMinutes) {
-                _selectedEndTime = null;
+                _selectedEndTime = null; // Reset end time if it's not after start time
              }
           }
         } else {
@@ -177,19 +173,17 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     }
   }
 
-  // Method to handle form submission
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) {
        _showValidationError('Please fill in all required fields correctly.');
-       return; // Stop if basic validation fails
+       return;
     }
 
-    // Check other selections
     if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
        _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
     }
 
-    // Combine Date and Time
+    // Combine Date and Time - IMPORTANT: Ensure these are in the correct local time
     final DateTime startDateTime = DateTime(
       _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
       _selectedStartTime!.hour, _selectedStartTime!.minute,
@@ -199,12 +193,10 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       _selectedEndTime!.hour, _selectedEndTime!.minute,
     );
 
-    // Validate time order
     if (!endDateTime.isAfter(startDateTime)) {
        _showValidationError('End time must be after start time.'); return;
     }
 
-    // Validate date is not past
     final DateTime today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
     if (_selectedDate!.isBefore(today)) {
         _showValidationError('Cannot create a lecture for a past date.'); return;
@@ -212,41 +204,63 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
     String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
 
-    setState(() => _isLoading = true);
-
-    // Pass combined DateTime objects AND onlineLink to Lecture constructor
+    // Create the Lecture object
     final newLecture = Lecture(
-      id: '',
+      id: '', // ID will be generated by backend
       lecturerId: widget.currentUser.id,
       lecturerName: widget.currentUser.name,
       lecturerPhone: _lecturerPhoneController.text.trim().isEmpty ? null : _lecturerPhoneController.text.trim(),
-      school: widget.currentUser.school ?? 'N/A',
-      department: widget.currentUser.department ?? 'N/A',
-      course: widget.currentUser.course ?? 'N/A',
+      school: widget.currentUser.school ?? 'N/A', // Use lecturer's profile data
+      department: widget.currentUser.department ?? 'N/A', // Use lecturer's profile data
+      course: widget.currentUser.course ?? 'N/A', // Use lecturer's profile data
       yearOfStudy: _selectedYear!,
       semester: _selectedSemester!,
       unitName: _unitNameController.text.trim(),
       unitCode: _unitCodeController.text.trim(),
+      // Pass DateTime objects directly; toApiJson should handle conversion
       lectureDate: _selectedDate,
       startTime: startDateTime,
       endTime: endDateTime,
       venue: _selectedVenue!,
       onlineLink: onlineLinkValue,
-      createdAt: null,
+      createdAt: null, // Will be set by backend
     );
 
+    // --- *** ADDED LOGGING *** ---
+    if (kDebugMode) {
+      print('[CreateLectureDialog] Attempting to create lecture...');
+      try {
+        // Assuming Lecture model has a `toApiJson` method
+        // Ensure `toApiJson` converts DateTime fields to ISO8601 strings:
+        // e.g., 'startTime': startTime?.toIso8601String(),
+        final jsonPayload = newLecture.toApiJson();
+        print('[CreateLectureDialog] Lecture Data (JSON Payload): ${jsonEncode(jsonPayload)}');
+      } catch (e) {
+        print('[CreateLectureDialog] Error converting lecture to JSON for logging: $e');
+        // Log the basic object if JSON conversion fails for logging
+        print('[CreateLectureDialog] Lecture Data (Object): ${newLecture.toString()}');
+      }
+    }
+    // --- *** END ADDED LOGGING *** ---
+
+    setState(() => _isLoading = true);
+
     try {
-      await _apiService.createLecture(newLecture); // API service uses lecture.toApiJson()
+      // Call the API service - it should handle sending the JSON payload
+      await _apiService.createLecture(newLecture);
       if (!mounted) return;
+      // Success: Pop dialog and return true
       Navigator.of(context).pop(true);
     } catch (e) {
        if (!mounted) return;
-       // Show specific error from ApiException if available
+       // Handle API or other errors
        String errorMessage = 'Failed to create lecture.';
        if (e is ApiException) {
-          errorMessage += ' ${e.message}';
+          errorMessage += ' ${e.message}'; // Use message from ApiException
+          if (kDebugMode) print('[CreateLectureDialog] API Error: ${e.statusCode} - ${e.message}');
        } else {
-          errorMessage += ' ${e.toString()}';
+          errorMessage += ' Please try again.'; // Generic message
+          if (kDebugMode) print('[CreateLectureDialog] General Error: ${e.toString()}');
        }
        _showValidationError(errorMessage);
     } finally {
@@ -254,11 +268,10 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
         setState(() => _isLoading = false);
       }
     }
-
   }
 
-  // Helper to show validation error snackbar
   void _showValidationError(String message) {
+     // ... (snackbar code remains the same) ...
      if (!mounted) return;
      ScaffoldMessenger.of(context).showSnackBar(
        SnackBar(
@@ -273,6 +286,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (build method UI remains the same) ...
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       title: const Text('Create New Lecture'),
@@ -299,6 +313,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   controller: _lecturerPhoneController,
                   decoration: _inputDecoration('Your Phone Number', prefixIcon: const Icon(Icons.phone_outlined), isRequired: false),
                   keyboardType: TextInputType.phone,
+                  // Optional: Add validation for phone format if needed
                 ),
                 const SizedBox(height: 12),
                 InputDecorator(
@@ -366,7 +381,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   ),
                   inputFormatters: [
                     UpperCaseTextFormatter(),
-                    FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9 ]')),
+                    FilteringTextInputFormatter.allow(RegExp(r'[A-Z0-9 ]')), // Allow letters, numbers, space
                   ],
                   textCapitalization: TextCapitalization.characters,
                   validator: (value) {
@@ -374,7 +389,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                       return 'Unit code is required';
                     }
                     final trimmedValue = value.trim();
-                    final RegExp unitCodeFormat = RegExp(r'^[A-Z]{2,4} \d{3,}$');
+                    // Relaxed format: Allow 2-4 letters, space, then numbers
+                    final RegExp unitCodeFormat = RegExp(r'^[A-Z]{2,4} \d+$');
                     if (!unitCodeFormat.hasMatch(trimmedValue)) {
                       return 'Format must be like "COM 123"';
                     }
@@ -393,9 +409,11 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   child: InputDecorator(
                     decoration: _inputDecoration('Date', prefixIcon: const Icon(Icons.calendar_today_outlined), isRequired: true).copyWith(
                       hintText: _selectedDate == null ? 'Select Date' : null,
+                      // Show error state if validation fails but field is touched
+                      errorText: _formKey.currentState?.validate() == false && _selectedDate == null ? 'Date is required' : null,
                     ),
                     child: _selectedDate == null
-                        ? null
+                        ? null // Show hint text from decoration
                         : Text(DateFormat.yMMMEd().format(_selectedDate!), style: const TextStyle(fontSize: 16)),
                   ),
                 ),
@@ -409,6 +427,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                          child: InputDecorator(
                            decoration: _inputDecoration('Start Time', prefixIcon: const Icon(Icons.access_time_outlined), isRequired: true).copyWith(
                              hintText: _selectedStartTime == null ? 'Select Start' : null,
+                             errorText: _formKey.currentState?.validate() == false && _selectedStartTime == null ? 'Required' : null,
                            ),
                            child: _selectedStartTime == null
                                ? null
@@ -424,6 +443,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                          child: InputDecorator(
                            decoration: _inputDecoration('End Time', prefixIcon: const Icon(Icons.update_outlined), isRequired: true).copyWith(
                              hintText: _selectedEndTime == null ? 'Select End' : null,
+                             errorText: _formKey.currentState?.validate() == false && _selectedEndTime == null ? 'Required' : null,
                            ),
                            child: _selectedEndTime == null
                                ? null
@@ -448,7 +468,6 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 // --- END Venue Dropdown ---
 
                 // --- Conditional Online Link Field ---
-                // Use AnimatedSize/Visibility for smoother transition (optional)
                 if (_selectedVenue == 'ONLINE') ...[
                   const SizedBox(height: 12),
                   TextFormField(
@@ -461,42 +480,36 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                     ),
                     keyboardType: TextInputType.url,
                     validator: (value) {
-                      // Only validate if the venue is actually ONLINE
                       if (_selectedVenue == 'ONLINE') {
                         if (value == null || value.trim().isEmpty) {
                           return 'Online link is required for ONLINE venue';
                         }
-                        // Basic URL validation
                         final uri = Uri.tryParse(value.trim());
                         if (uri == null || !uri.hasAbsolutePath || !uri.hasScheme || !(uri.isScheme('http') || uri.isScheme('https'))) {
                            return 'Please enter a valid URL (e.g., https://...)';
                         }
                       }
-                      return null; // No error if venue is not ONLINE
+                      return null;
                     },
                   ),
                 ],
-
               ],
             ),
           ),
         ),
       ),
-      // --- Dialog Actions ---
       actionsPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
       actions: <Widget>[
         TextButton(
-          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false), // Cancel
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
         ElevatedButton.icon(
-          icon: _isLoading
-              ? Container() // Hide icon when loading
-              : const Icon(Icons.check_circle_outline, size: 20),
+          icon: _isLoading ? Container() : const Icon(Icons.check_circle_outline, size: 20),
           label: _isLoading
               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Text('Create Lecture'),
-          onPressed: _isLoading ? null : _submitForm, // Submit
+          onPressed: _isLoading ? null : _submitForm,
           style: ElevatedButton.styleFrom(
             backgroundColor: CreateLectureDialog.brandColor,
             foregroundColor: Colors.white,
@@ -505,7 +518,6 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
           ),
         ),
       ],
-      // --- End Dialog Actions ---
     );
   }
 }

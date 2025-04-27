@@ -1,6 +1,6 @@
 // lib/screens/login_screen.dart
 import 'dart:async'; // For Timer (used by background animation)
-import 'dart:math';  // For Random (if needed, though not directly used here)
+// For Random (if needed, though not directly used here)
 
 import 'package:checkmate/screens/register_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
@@ -110,7 +110,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 
 
-  // --- Login Action --- (no changes needed here)
+  // --- Login Action --- 
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) {
       _showSnackBar('Please fix the errors in the form.', isError: true);
@@ -151,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  // --- Resend Verification Email Action --- (no changes needed here)
+  // --- Resend Verification Email Action --- 
   Future<void> _handleResendVerification() async {
      final authService = Provider.of<AuthService>(context, listen: false);
      if (!mounted) return;
@@ -173,7 +173,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
      }
   }
 
-  // --- Forgot Password Action --- (no changes needed here)
+  // --- Forgot Password Action --- 
   Future<void> _handleForgotPassword() async {
     final authService = Provider.of<AuthService>(context, listen: false);
     final email = _emailController.text.trim();
@@ -214,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  // --- Contact Support Action --- (no changes needed here)
+  // --- Contact Support Action --- 
   Future<void> _contactSupport() async {
     final enteredEmail = _emailController.text.trim();
     final String emailBody = '''

@@ -18,7 +18,7 @@ class User {
   final String? semester;           // Specific to students
   final Timestamp? createdAt;        // Timestamp of creation
 
-  const User({ // Use const constructor for immutable class
+  const User({ // const constructor for immutable class
     required this.id,
     required this.name,
     required this.email,
@@ -44,12 +44,11 @@ class User {
       if (value is Timestamp) {
         return value;
       }
-      // Add other parsing logic if needed (e.g., from String, Map)
       return null;
     }
 
     return User(
-      id: doc.id, // Use the document ID from the snapshot
+      id: doc.id, // the document ID from the snapshot
       name: data['name'] as String? ?? '', // Provide default if missing
       email: data['email'] as String? ?? '', // Provide default if missing
       phoneNumber: data['phoneNumber'] as String? ?? '', // Provide default if missing
@@ -76,14 +75,14 @@ class User {
       'email': email,
       'phoneNumber': phoneNumber, 
       'role': role,
-      'isVerified': isVerified, // Include verification status (might be updated by backend trigger/function)
+      'isVerified': isVerified, // verification status (might be updated by backend trigger/function)
 
       // Only include non-null values for optional fields
       if (school != null) 'school': school,
       if (department != null) 'department': department,
       if (course != null) 'course': course,
 
-      // Include student-specific fields only if they are non-null (relevant for students)
+      // student-specific fields only if they are non-null (relevant for students)
       if (registrationNumber != null) 'registrationNumber': registrationNumber,
       if (yearOfStudy != null) 'yearOfStudy': yearOfStudy, 
       if (semester != null) 'semester': semester,

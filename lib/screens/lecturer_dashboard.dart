@@ -158,8 +158,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   onPrimary: Colors.white,
                   surface: Colors.white,
                   onSurface: Colors.black87,
-                ),
-             dialogBackgroundColor: Colors.white,
+                ), dialogTheme: DialogThemeData(backgroundColor: Colors.white),
           ),
           child: child!,
         );

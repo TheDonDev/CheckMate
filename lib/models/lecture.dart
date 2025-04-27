@@ -10,13 +10,13 @@ DateTime? _parseDateTimeToUtc(dynamic timestampData) {
   if (timestampData == null) return null;
   try {
     if (timestampData is Timestamp) {
-      return timestampData.toDate(); // Already UTC
+      return timestampData.toDate(); // UTC
     } else if (timestampData is String) {
       final dtIso = DateTime.tryParse(timestampData);
       if (dtIso != null) {
-        // *** ADDED LOGGING ***
+        
         if (kDebugMode) print("[ParseHelper] Parsed ISO '$timestampData' to DateTime (isUtc: ${dtIso.isUtc}): ${dtIso.toIso8601String()} -> UTC: ${dtIso.toUtc().toIso8601String()}");
-        return dtIso.toUtc(); // Ensure it's UTC
+        return dtIso.toUtc(); // Ensured it's UTC
       }
       DateTime? dtYmd;
       try {
@@ -24,12 +24,12 @@ DateTime? _parseDateTimeToUtc(dynamic timestampData) {
         dtYmd = DateTime.utc(parsedDate.year, parsedDate.month, parsedDate.day);
         if (kDebugMode) print("[ParseHelper] Parsed YMD '$timestampData' to DateTime UTC: ${dtYmd.toIso8601String()}");
       } on FormatException { dtYmd = null; }
-      if (dtYmd != null) return dtYmd; // Already UTC
+      if (dtYmd != null) return dtYmd; // UTC
 
     } else if (timestampData is Map && timestampData.containsKey('_seconds')) {
       final ts = Timestamp(timestampData['_seconds'], timestampData['_nanoseconds'] ?? 0);
       if (kDebugMode) print("[ParseHelper] Parsed Map Timestamp to DateTime UTC: ${ts.toDate().toIso8601String()}");
-      return ts.toDate(); // Already UTC
+      return ts.toDate(); //  UTC
     } else if (timestampData is int) {
       final dt = DateTime.fromMillisecondsSinceEpoch(timestampData, isUtc: true);
       if (kDebugMode) print("[ParseHelper] Parsed Int Epoch to DateTime UTC: ${dt.toIso8601String()}");
@@ -97,25 +97,25 @@ class Lecture {
   // --- Formatting Getters ---
   String get formattedDate {
     final localDate = lectureDate?.toLocal();
-    // *** ADDED LOGGING ***
+   
     if (kDebugMode) print("[Lecture Format] Formatting lectureDate (UTC: ${lectureDate?.toIso8601String()}) to Local: ${localDate?.toIso8601String()}");
     return localDate != null ? DateFormat.yMMMEd().format(localDate) : 'N/A';
   }
   String get formattedStartTime {
     final localStartTime = startTime?.toLocal();
-    // *** ADDED LOGGING ***
+   
     if (kDebugMode) print("[Lecture Format] Formatting startTime (UTC: ${startTime?.toIso8601String()}) to Local: ${localStartTime?.toIso8601String()}");
     return localStartTime != null ? DateFormat.jm().format(localStartTime) : 'N/A';
   }
   String get formattedEndTime {
      final localEndTime = endTime?.toLocal();
-    // *** ADDED LOGGING ***
+   
     if (kDebugMode) print("[Lecture Format] Formatting endTime (UTC: ${endTime?.toIso8601String()}) to Local: ${localEndTime?.toIso8601String()}");
     return localEndTime != null ? DateFormat.jm().format(localEndTime) : 'N/A';
   }
   String get formattedCreatedAt {
     final localCreatedAt = createdAt?.toLocal();
-    // *** ADDED LOGGING ***
+  
     if (kDebugMode) print("[Lecture Format] Formatting createdAt (UTC: ${createdAt?.toIso8601String()}) to Local: ${localCreatedAt?.toIso8601String()}");
     return localCreatedAt != null ? DateFormat.yMd().add_jm().format(localCreatedAt) : 'N/A';
   }
@@ -125,7 +125,7 @@ class Lecture {
   // --- Firestore Conversion ---
   factory Lecture.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
-    // *** ADDED LOGGING ***
+
     if (kDebugMode) print("[Lecture fromFirestore] Raw data: $data");
     final lecture = Lecture(
       id: doc.id,
@@ -146,7 +146,6 @@ class Lecture {
       createdAt: _parseDateTimeToUtc(data['createdAt']),     // Parse to UTC
       onlineLink: data['onlineLink'] as String?,
     );
-    // *** ADDED LOGGING ***
     if (kDebugMode) print("[Lecture fromFirestore] Parsed Lecture object: $lecture");
     return lecture;
   }
@@ -177,7 +176,6 @@ class Lecture {
 
   // --- API Conversion Methods ---
   factory Lecture.fromApiJson(Map<String, dynamic> json) {
-    // *** ADDED LOGGING ***
     if (kDebugMode) print("[Lecture fromApiJson] Raw JSON received: $json");
     final lecture = Lecture(
       id: json['id'] as String? ?? json['_id'] as String? ?? '',
@@ -198,7 +196,6 @@ class Lecture {
       createdAt: _parseDateTimeToUtc(json['createdAt']),     // Parse to UTC
       onlineLink: json['onlineLink'] as String?,
     );
-     // *** ADDED LOGGING ***
     if (kDebugMode) print("[Lecture fromApiJson] Parsed Lecture object: $lecture");
     return lecture;
   }
@@ -274,9 +271,7 @@ class Lecture {
 
   @override
   String toString() {
-    // Use formatting getters which handle nulls and local time conversion
     String linkInfo = onlineLink != null ? ', link: $onlineLink' : '';
-    // Also include UTC times for debugging
     String utcStart = startTime != null ? startTime!.toUtc().toIso8601String() : 'null';
     String utcEnd = endTime != null ? endTime!.toUtc().toIso8601String() : 'null';
     return 'Lecture(id: $id, unit: $unitName ($unitCode), lecturer: $lecturerName, date: $formattedDate, start: $formattedStartTime (UTC: $utcStart), end: $formattedEndTime (UTC: $utcEnd), venue: $venue$linkInfo)';

@@ -32,7 +32,7 @@ class InputField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Use the consistent InputDecoration style
+    // consistent InputDecoration style
     final inputDecoration = InputDecoration(
       labelText: labelText,
       hintText: hintText,
@@ -62,7 +62,7 @@ class InputField extends StatelessWidget {
       contentPadding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
     );
 
-    return TextFormField( // Use TextFormField for validation
+    return TextFormField( // TextFormField for validation
       controller: controller,
       decoration: inputDecoration,
       keyboardType: keyboardType,

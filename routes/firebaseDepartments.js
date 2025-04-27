@@ -1,8 +1,8 @@
 // c:\Users\Test\FlutterProjects\checkmate\routes\firebaseDepartments.js
 const express = require('express');
-const { db } = require('../firebase'); // Assuming firebase.js exports db
+const { db } = require('../firebase'); 
 const router = express.Router();
-const checkAuth = require('../middleware/checkAuth'); // Assuming you have authentication middleware
+const checkAuth = require('../middleware/checkAuth'); 
 
 // --- Constants ---
 const DEPARTMENTS_COLLECTION = 'departments'; // Standardize on lowercase
@@ -12,9 +12,9 @@ const USERS_COLLECTION = 'users';             // For admin checks
 // --- Create a new department ---
 // SECURITY: Creating departments should likely be restricted to administrators.
 // Apply checkAuth and add role-based authorization.
-router.post('/', checkAuth, async (req, res) => { // Added checkAuth
+router.post('/', checkAuth, async (req, res) => { 
   try {
-    // --- Authorization Check (Example: Check if user is admin) ---
+    // --- Authorization Check  ---
     const requestingUserId = req.userData.userId;
     try {
         const userDoc = await db.collection(USERS_COLLECTION).doc(requestingUserId).get();
@@ -48,7 +48,7 @@ router.post('/', checkAuth, async (req, res) => { // Added checkAuth
         return res.status(400).json({ error: `Invalid School ID: The specified school does not exist.` });
     }
 
-    // --- Optional: Check for duplicate department name within the same school ---
+    // ---  Check for duplicate department name within the same school ---
     const existingDeptQuery = await db.collection(DEPARTMENTS_COLLECTION)
         .where('name', '==', name.trim())
         .where('schoolId', '==', schoolId.trim()) // Check within the specific school
@@ -154,7 +154,7 @@ router.get('/school/:schoolId', checkAuth, async (req, res) => {
     const schoolId = req.params.schoolId;
     console.log(`Fetching departments for school ID: ${schoolId}`);
 
-    // Validate the school ID exists (optional but good practice)
+    // Validate the school ID exists 
     const schoolRef = db.collection(SCHOOLS_COLLECTION).doc(schoolId);
     const schoolDoc = await schoolRef.get();
     if (!schoolDoc.exists) {

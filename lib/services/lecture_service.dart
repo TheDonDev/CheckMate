@@ -47,11 +47,11 @@ class Lecture {
   final String semester;
   final String unitName;
   final String unitCode;
-  final DateTime lectureDate; // Keep as DateTime for UI formatting
+  final DateTime lectureDate; 
   final Timestamp startTime;
   final Timestamp endTime;
   final String venue;
-  final DateTime createdAt; // Keep as DateTime for UI formatting
+  final DateTime createdAt; 
 
   Lecture({
     required this.id,
@@ -138,7 +138,7 @@ class Lecture {
   factory Lecture.fromApiJson(Map<String, dynamic> json) {
     // Adapt this based on the actual structure returned by your API
     return Lecture(
-      // Use 'id' or '_id' depending on your backend convention
+      // 'id' or '_id' depending on your backend convention
       id: json['id'] ?? json['_id'] ?? '',
       lecturerId: json['lecturerId'] ?? '',
       lecturerName: json['lecturerName'] ?? '',
@@ -155,7 +155,7 @@ class Lecture {
       startTime: _parseTimestamp(json['startTime']) ?? Timestamp.fromDate(DateTime(1970)),
       endTime: _parseTimestamp(json['endTime']) ?? Timestamp.fromDate(DateTime(1970)),
       venue: json['venue'] ?? '',
-      // Use 'createdAt' or other field name from API
+      //  'createdAt' or other field name from API
       createdAt: (json['createdAt'] != null) ? DateTime.parse(json['createdAt']) : DateTime(1970),
     );
   }
@@ -233,11 +233,11 @@ class Lecture {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    // Add more fields for a robust comparison if needed
+    // more fields for a robust comparison if needed
     return other is Lecture && other.id == id;
   }
 
   @override
-  // Add more fields for a robust hash code if needed
+  // more fields for a robust hash code if needed
   int get hashCode => id.hashCode;
 }

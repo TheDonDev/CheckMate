@@ -1,8 +1,8 @@
 // c:\Users\Test\FlutterProjects\checkmate\routes\firebaseUsers.js
 const express = require('express');
-const { db, admin } = require('../firebase'); // Ensure admin is exported if needed for advanced operations, db is essential
+const { db, admin } = require('../firebase'); 
 const router = express.Router();
-const checkAuth = require('../middleware/checkAuth'); // Assuming you have authentication middleware
+const checkAuth = require('../middleware/checkAuth'); 
 
 // --- Constants ---
 const USERS_COLLECTION = 'users'; // Standardize on lowercase 'users' as used in AuthService and other routes
@@ -20,9 +20,7 @@ const formatTimestamp = (timestamp) => {
 
 // --- Get all users ---
 // SECURITY: This endpoint exposes all user data. It should be protected
-// and only accessible by administrators. Apply appropriate middleware (e.g., checkAuth and role check).
-// Example: router.get('/', checkAuth, checkAdminRole, async (req, res) => { ... });
-router.get('/', checkAuth, async (req, res) => { // Added checkAuth for basic login requirement
+router.get('/', checkAuth, async (req, res) => { // checkAuth for basic login requirement
   try {
     // --- Authorization Check (Example: Check if user is admin) ---
     // const requestingUserId = req.userData.userId;
@@ -33,7 +31,7 @@ router.get('/', checkAuth, async (req, res) => { // Added checkAuth for basic lo
     // }
     // --- End Authorization Check ---
 
-    console.log('Fetching all users (Admin access)'); // Log access
+    console.log('Fetching all users (Admin access)'); 
     const snapshot = await db.collection(USERS_COLLECTION).get();
     const users = [];
     snapshot.forEach((doc) => {
@@ -43,17 +41,16 @@ router.get('/', checkAuth, async (req, res) => { // Added checkAuth for basic lo
         uid: data.uid, // Include uid field if stored explicitly
         name: data.name,
         email: data.email,
-        phoneNumber: data.phoneNumber, // Include phone number
+        phoneNumber: data.phoneNumber, 
         role: data.role,
         school: data.school,
         department: data.department,
         course: data.course,
-        registrationNumber: data.registrationNumber, // Include student fields
+        registrationNumber: data.registrationNumber, 
         yearOfStudy: data.yearOfStudy,
         semester: data.semester,
         isVerified: data.isVerified,
         createdAt: formatTimestamp(data.createdAt), // Format timestamp
-        // Add any other relevant fields, but avoid sensitive ones like password hashes (which shouldn't be here anyway)
       });
     });
     res.json(users);
@@ -68,12 +65,7 @@ router.get('/', checkAuth, async (req, res) => { // Added checkAuth for basic lo
 });
 
 // --- Get user by ID (UID) ---
-// SECURITY: Decide who can access user profiles.
-// Option 1: Only the user themselves (check if req.params.userId === req.userData.userId)
-// Option 2: The user themselves OR an admin.
-// Option 3: Anyone logged in (using checkAuth only).
-// Apply middleware accordingly.
-router.get('/:userId', checkAuth, async (req, res) => { // Added checkAuth
+router.get('/:userId', checkAuth, async (req, res) => { 
   try {
     const requestedUserId = req.params.userId; // This is the Firebase Auth UID
     const authUserId = req.userData.userId; // User making the request

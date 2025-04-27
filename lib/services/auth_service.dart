@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart'; // Import ChangeNotifier
 // Custom Exception for Auth errors
 class AuthException implements Exception {
   final String message;
-  // Optional: Add a code for specific error types (like email not verified)
+  // Add a code for specific error types (like email not verified)
   final String? code;
   AuthException(this.message, {this.code});
 
@@ -236,13 +236,13 @@ class AuthService extends ChangeNotifier {
 
 
   // --- Login Method (MODIFIED for email verification handling AND special user bypass) ---
-  Future<app_user.User?> login(String email, String password) async { // Removed skipEmailVerification param as it's handled internally now
-    final trimmedEmail = email.trim().toLowerCase(); // Use lowercase for comparison
+  Future<app_user.User?> login(String email, String password) async { 
+    final trimmedEmail = email.trim().toLowerCase(); //  lowercase for comparison
 
     try {
       // 1. Sign in using Firebase Auth
       final userCredential = await _firebaseAuth.signInWithEmailAndPassword(
-        email: trimmedEmail, // Use trimmed/lowercase email
+        email: trimmedEmail, //  trimmed/lowercase email
         password: password,
       );
       final fbUser = userCredential.user;
@@ -328,12 +328,12 @@ class AuthService extends ChangeNotifier {
       throw AuthException('Cannot resend email. Please try logging in first.');
     }
 
-    // --- Add check: Don't allow resend for the special bypass user ---
+    // --- Don't allow resend for the special bypass user ---
     if (fbUser.email?.toLowerCase() == _specialBypassEmail) {
         print("Resend verification email skipped for special user: ${fbUser.email}");
         throw AuthException('Email verification is not required for this account.');
     }
-    // --- End check ---
+    
 
     try {
       // Reload first to ensure we have the latest verification status

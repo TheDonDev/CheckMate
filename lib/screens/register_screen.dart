@@ -239,7 +239,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ],
                   textCapitalization: TextCapitalization.characters,
                   validator: (value) {
-                    // --- Name Validation Logic (Handles various formats) ---
+                    // --- Name Validation Logic  ---
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your full name';
                     }

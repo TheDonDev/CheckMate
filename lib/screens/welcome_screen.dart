@@ -215,7 +215,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                     ],
                   ),
 
-                  // --- Bottom Section (Buttons) ---
+                  // --- Bottom Section  ---
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [

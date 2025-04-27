@@ -109,7 +109,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
   // Helper for consistent InputDecoration
   InputDecoration _inputDecoration(String label, {String? hint, Widget? prefixIcon, bool isRequired = false}) {
     return InputDecoration(
-      labelText: '$label${isRequired ? " *" : ""}', // Add asterisk if required
+      labelText: '$label${isRequired ? " *" : ""}', 
       hintText: hint,
       prefixIcon: prefixIcon != null
           ? IconTheme(
@@ -274,7 +274,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
 
   Widget _buildDisabledInfoField(String label, String value) {
     return InputDecorator(
-      decoration: _inputDecoration(label).copyWith( // Use helper for consistency
+      decoration: _inputDecoration(label).copyWith( // helper for consistency
         fillColor: Colors.grey[200], // Slightly darker background for disabled
       ),
       child: Text(value, style: TextStyle(color: Colors.grey[800], fontSize: 16)), // Darker text for readability

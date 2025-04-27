@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:checkmate/constants/dropdown_data.dart';
 import 'dart:async'; // Needed for TimeoutException
 
-// --- UpperCaseTextFormatter (Keep as is) ---
+// --- UpperCaseTextFormatter ---
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
@@ -42,8 +42,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
   String? _selectedSemester;
   String? _selectedVenue;
   late DateTime _selectedDate;
-  late TimeOfDay _selectedStartTime; // Keep as TimeOfDay for picker state
-  late TimeOfDay _selectedEndTime;   // Keep as TimeOfDay for picker state
+  late TimeOfDay _selectedStartTime; //  TimeOfDay for picker state
+  late TimeOfDay _selectedEndTime; 
 
   static const Color brandColor = Color(0xFF0175C2);
 
@@ -183,7 +183,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
            final endMinutes = _selectedEndTime.hour * 60 + _selectedEndTime.minute;
            if(endMinutes <= startMinutes) {
               // Calculate end time ensuring it wraps around midnight correctly if needed
-              final newEndMinute = (startMinutes + 60) % (24 * 60); // Add 60 minutes, wrap around 24 hours
+              final newEndMinute = (startMinutes + 60) % (24 * 60); // 60 minutes, wrap around 24 hours
               _selectedEndTime = TimeOfDay(hour: newEndMinute ~/ 60, minute: newEndMinute % 60);
               if (kDebugMode) print("[EditDialog] End Time Auto-Adjusted (Local): $_selectedEndTime");
            }
@@ -253,13 +253,13 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       'yearOfStudy': _selectedYear,
       'semester': _selectedSemester,
       // Send dates/times in ISO 8601 format with offset.
-      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), // Keep date only part if needed separately
+      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), 
       'startTime': startDateTime.toIso8601String(), // Includes offset
-      'endTime': endDateTime.toIso8601String(),     // Includes offset
+      'endTime': endDateTime.toIso8601String(),     
       'onlineLink': onlineLinkValue,
     };
 
-    // *** ADDED LOGGING: Log data being sent ***
+    // ***  Log data being sent ***
     if (kDebugMode) {
       print("[EditDialog Update] Sending update data to API: $updatedData");
     }
@@ -435,7 +435,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                     },
                   ),
                 ],
-                // --- END ADDED ---
+               
 
                 const SizedBox(height: 15), // Spacing before schedule
 

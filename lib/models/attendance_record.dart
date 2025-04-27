@@ -43,7 +43,7 @@ String? _toIso8601String(dynamic dateOrTimestamp) {
   if (dateOrTimestamp is Timestamp) { dateTime = dateOrTimestamp.toDate(); }
   else if (dateOrTimestamp is DateTime) { dateTime = dateOrTimestamp; }
   else { return null; }
-  return dateTime.toUtc().toIso8601String(); // Use UTC for consistency
+  return dateTime.toUtc().toIso8601String(); // UTC for consistency
 }
 
 // Helper function to safely parse boolean from various formats
@@ -60,23 +60,23 @@ bool _parseBool(dynamic boolData) {
 class AttendanceRecord {
   final String id; // Firestore document ID or API ID
   final String lectureId;
-  final String userId; // Using userId as per your provided code
+  final String userId; // userId as per your provided code
   final String studentName;
   final String registrationNumber;
   final Timestamp joinedAt; // When the student joined the lecture
   final Timestamp? checkInTime;
-  final bool checkedIn; // Using checkedIn as per your provided code
+  final bool checkedIn; // checkedIn as per your provided code
   final String? checkedInBy; // Lecturer's User ID who checked them in
   final String? percentage; 
 
-  const AttendanceRecord({ // Use const constructor
+  const AttendanceRecord({ // const constructor
     required this.id,
     required this.lectureId,
     required this.userId,
     required this.studentName,
     required this.registrationNumber,
     required this.joinedAt,
-    required this.checkedIn, // Use checkedIn
+    required this.checkedIn,
     this.checkInTime,
     this.checkedInBy,
     this.percentage,
@@ -94,11 +94,11 @@ class AttendanceRecord {
     return AttendanceRecord(
       id: doc.id,
       lectureId: data['lectureId'] as String? ?? '',
-      userId: data['userId'] as String? ?? '', // Use userId
+      userId: data['userId'] as String? ?? '', 
       studentName: data['studentName'] as String? ?? 'Unknown Student',
       registrationNumber: data['registrationNumber'] as String? ?? 'N/A',
       joinedAt: _parseTimestamp(data['joinedAt']) ?? Timestamp.now(),
-      checkedIn: _parseBool(data['checkedIn']), // Use checkedIn and safe parsing
+      checkedIn: _parseBool(data['checkedIn']), 
       checkInTime: _parseTimestamp(data['checkInTime']),
       checkedInBy: data['checkedInBy'] as String?,
       percentage: data['percentage'] as String?,
@@ -106,14 +106,13 @@ class AttendanceRecord {
   }
 
   Map<String, dynamic> toFirestore() {
-    // Used when writing data *to* Firestore from the client (less common for attendance)
     return {
       'lectureId': lectureId,
-      'userId': userId, // Use userId
+      'userId': userId, 
       'studentName': studentName,
       'registrationNumber': registrationNumber,
       'joinedAt': joinedAt,
-      'checkedIn': checkedIn, // Use checkedIn
+      'checkedIn': checkedIn,
       'checkInTime': checkInTime,
       'checkedInBy': checkedInBy,
       'percentage': percentage,
@@ -129,14 +128,13 @@ class AttendanceRecord {
         percentageValue = json['percentage'].toString(); // Safely convert to string if not null
         }
         return AttendanceRecord(
-      // Use 'id' or '_id' from API, fallback
       id: json['id'] as String? ?? json['_id'] as String? ?? '',
       lectureId: json['lectureId'] as String? ?? '',
-      userId: json['userId'] as String? ?? '', // Use userId
+      userId: json['userId'] as String? ?? '', 
       studentName: json['studentName'] as String? ?? 'Unknown Student',
       registrationNumber: json['registrationNumber'] as String? ?? 'N/A',
       joinedAt: _parseTimestamp(json['joinedAt']) ?? Timestamp.now(),
-      checkedIn: _parseBool(json['checkedIn']), // Use checkedIn and safe parsing
+      checkedIn: _parseBool(json['checkedIn']),
       checkInTime: _parseTimestamp(json['checkInTime']), // nullable
       checkedInBy: json['checkedInBy'] as String?,
       percentage: percentageValue,  // Ensure it's treated as String?
@@ -148,11 +146,11 @@ class AttendanceRecord {
     return {
       // 'id': id, // Usually not sent when creating/updating via actions
       'lectureId': lectureId,
-      'userId': userId, // Use userId
+      'userId': userId, 
       'studentName': studentName,
       'registrationNumber': registrationNumber,
       'joinedAt': _toIso8601String(joinedAt), // Send as ISO string
-      'checkedIn': checkedIn, // Use checkedIn
+      'checkedIn': checkedIn, 
       'checkInTime': _toIso8601String(checkInTime), // Send as ISO string or null
       'checkedInBy': checkedInBy,
     };
@@ -168,7 +166,7 @@ class AttendanceRecord {
     String? studentName,
     String? registrationNumber,
     Timestamp? joinedAt,
-    bool? checkedIn, // Use checkedIn
+    bool? checkedIn, 
     Timestamp? checkInTime,
     String? checkedInBy,
     // Add bool flags to explicitly handle setting nullable fields to null
@@ -178,11 +176,11 @@ class AttendanceRecord {
     return AttendanceRecord(
       id: id ?? this.id,
       lectureId: lectureId ?? this.lectureId,
-      userId: userId ?? this.userId, // Use userId
+      userId: userId ?? this.userId, 
       studentName: studentName ?? this.studentName,
       registrationNumber: registrationNumber ?? this.registrationNumber,
       joinedAt: joinedAt ?? this.joinedAt,
-      checkedIn: checkedIn ?? this.checkedIn, // Use checkedIn
+      checkedIn: checkedIn ?? this.checkedIn, 
       checkInTime: setCheckInTimeNull ? null : (checkInTime ?? this.checkInTime),
       checkedInBy: setCheckedInByNull ? null : (checkedInBy ?? this.checkedInBy),
     );
@@ -200,11 +198,11 @@ class AttendanceRecord {
     return other is AttendanceRecord &&
         other.id == id &&
         other.lectureId == lectureId &&
-        other.userId == userId && // Use userId
+        other.userId == userId && 
         other.studentName == studentName &&
         other.registrationNumber == registrationNumber &&
         other.joinedAt == joinedAt &&
-        other.checkedIn == checkedIn && // Use checkedIn
+        other.checkedIn == checkedIn && 
         other.checkInTime == checkInTime &&
         other.checkedInBy == checkedInBy;
   }
@@ -213,11 +211,11 @@ class AttendanceRecord {
   int get hashCode =>
       id.hashCode ^
       lectureId.hashCode ^
-      userId.hashCode ^ // Use userId
+      userId.hashCode ^ 
       studentName.hashCode ^
       registrationNumber.hashCode ^
       joinedAt.hashCode ^
-      checkedIn.hashCode ^ // Use checkedIn
+      checkedIn.hashCode ^ 
       checkInTime.hashCode ^
       checkedInBy.hashCode;
 }

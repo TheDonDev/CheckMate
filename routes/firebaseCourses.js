@@ -1,6 +1,6 @@
 // c:\Users\Test\FlutterProjects\checkmate\routes\firebaseCourses.js
 const express = require('express');
-const { db } = require('../firebase'); // Assuming firebase.js exports db
+const { db } = require('../firebase'); 
 const router = express.Router();
 const checkAuth = require('../middleware/checkAuth'); // Assuming you have authentication middleware
 
@@ -29,7 +29,6 @@ router.post('/', checkAuth, async (req, res) => { // Added checkAuth
     // --- End Authorization Check ---
 
     // --- Extract Data from Request Body ---
-    // Consider if schoolId is also needed for context or validation, depending on data model
     const { name, departmentId } = req.body;
 
     // --- Validation ---
@@ -50,7 +49,7 @@ router.post('/', checkAuth, async (req, res) => { // Added checkAuth
         return res.status(400).json({ error: `Invalid Department ID: The specified department does not exist.` });
     }
 
-    // --- Optional: Check for duplicate course name within the same department ---
+    //  Check for duplicate course name within the same department ---
     const existingCourseQuery = await db.collection(COURSES_COLLECTION)
         .where('name', '==', name.trim())
         .where('departmentId', '==', departmentId.trim()) // Check within the specific department

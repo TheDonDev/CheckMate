@@ -1,6 +1,6 @@
 // lib/screens/lecture_attendance_screen.dart
 import 'dart:io';
-import 'dart:typed_data'; // Needed for Uint8List
+// Needed for Uint8List
 import 'dart:async'; // Needed for TimeoutException
 import 'dart:ui' as ui;
 
@@ -136,7 +136,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   }
 
   Future<void> _exportAttendanceCsv() async {
-    // *** STEP 1: Log function entry ***
+    
     if (kDebugMode) print("[DEBUG] _exportAttendanceCsv called.");
 
     if (_isProcessingExport || _sortedAttendanceList.isEmpty) {
@@ -148,11 +148,12 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     setState(() { _isProcessingExport = true; });
 
     try {
-      // *** STEP 2: Log before generating data ***
+     
       if (kDebugMode) print("[DEBUG] Generating CSV data...");
+      // This call is now valid because _generateCsvData is defined above
       final String csvData = _generateCsvData(_sortedAttendanceList);
 
-      // *** STEP 3: Log before getting directory ***
+     
       if (kDebugMode) print("[DEBUG] Getting temporary directory...");
       final tempDir = await getTemporaryDirectory();
       final safeUnitCode = widget.lecture.unitCode.replaceAll(RegExp(r'[^\w\.-]+'), '_');
@@ -163,7 +164,6 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       final file = File(filePath);
       if (kDebugMode) print('[DEBUG] Target file path: $filePath');
 
-      // *** STEP 4: Log before writing file ***
       if (kDebugMode) print('[DEBUG] Writing CSV data to file...');
       await file.writeAsString(csvData, flush: true);
       final fileExists = await file.exists();
@@ -174,7 +174,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
           throw Exception("Failed to write CSV file or file is empty.");
       }
 
-      // *** STEP 5: Log before sharing ***
+
       final xFile = XFile(filePath);
       if (kDebugMode) print('[DEBUG] XFile created for sharing: ${xFile.path}');
 
@@ -191,7 +191,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
         text: 'Attendance record for ${widget.lecture.unitName} (${widget.lecture.unitCode}) on ${widget.lecture.formattedDate}.',
         subject: 'Attendance: ${widget.lecture.unitCode} - ${widget.lecture.formattedDate}',
       );
-      // *** STEP 6: Log share result ***
+    
       if (kDebugMode) print('[DEBUG] Share result: Status=${result.status}, Raw=${result.raw}');
 
       if (mounted) {
@@ -211,7 +211,6 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       }
 
     } catch (e, s) { // Catch stack trace as well
-      // *** STEP 7: Log any caught error ***
       if (kDebugMode) {
          print("[DEBUG] Error exporting attendance CSV: $e");
          print("[DEBUG] Stack trace: $s");
@@ -230,8 +229,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   }
   // --- End CSV Export Logic ---
 
-
-  // --- _captureAndShareQrCode --- (No changes needed here)
+  // --- _captureAndShareQrCode --- 
   Future<void> _captureAndShareQrCode() async {
     try {
       if (_qrKey.currentContext == null) { throw Exception("QR Code context not found."); }
@@ -281,7 +279,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     }
   }
 
-  // --- _showQrCodeDialog  --- 
+  // --- _showQrCodeDialog  ---
   void _showQrCodeDialog() {
     if (widget.lecture.id.isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(
@@ -395,7 +393,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     );
   }
 
-  // --- _buildPercentageWidget --- 
+  // --- _buildPercentageWidget ---
   Widget _buildPercentageWidget(String? percentageString) {
     if (percentageString == null || percentageString == "N/A" || percentageString.isEmpty) {
       return Tooltip( message: 'Overall percentage unavailable', child: Icon(Icons.percent_outlined, color: Colors.grey.shade400, size: 16), );
@@ -576,3 +574,4 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     );
   }
 }
+

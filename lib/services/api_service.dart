@@ -63,7 +63,6 @@ class ApiService {
 
   // Helper to get Headers
   Future<Map<String, String>> _getHeaders({bool includeContentType = true}) async {
-    // ... (previous code remains the same) ...
      final headers = <String, String>{};
     if (includeContentType) {
       headers['Content-Type'] = 'application/json; charset=UTF-8';
@@ -95,7 +94,6 @@ class ApiService {
 
   // Helper for handling HTTP responses
   dynamic _handleResponse(http.Response response) {
-    // ... (previous code remains the same) ...
      final String responseBody = response.body;
     if (kDebugMode) print("API Response (${response.statusCode}) to ${response.request?.method} ${response.request?.url}: ${responseBody.length > 500 ? '${responseBody.substring(0, 500)}...' : responseBody}");
 
@@ -172,7 +170,7 @@ class ApiService {
       final response = await http.get(
         uri,
         headers: await _getHeaders(includeContentType: false),
-      ).timeout(_defaultTimeout); // Added timeout
+      ).timeout(_defaultTimeout); // timeout
       final List<dynamic> data = _handleResponse(response);
       return data.map((item) => Lecture.fromApiJson(item as Map<String, dynamic>)).toList();
     } on TimeoutException catch (_) {
@@ -194,7 +192,7 @@ class ApiService {
         uri,
         headers: await _getHeaders(),
         body: requestBody,
-      ).timeout(_defaultTimeout); // Added timeout
+      ).timeout(_defaultTimeout); // timeout
       final Map<String, dynamic> data = _handleResponse(response);
       return Lecture.fromApiJson(data);
     } on TimeoutException catch (_) {
@@ -216,7 +214,7 @@ class ApiService {
         uri,
         headers: await _getHeaders(),
         body: requestBody,
-      ).timeout(_defaultTimeout); // Added timeout
+      ).timeout(_defaultTimeout); // timeout
       final Map<String, dynamic> data = _handleResponse(response);
       return Lecture.fromApiJson(data);
     } on TimeoutException catch (_) {
@@ -239,7 +237,7 @@ class ApiService {
       final response = await http.post(
         uri,
         headers: await _getHeaders(includeContentType: false),
-      ).timeout(_defaultTimeout); // Added timeout
+      ).timeout(_defaultTimeout); // timeout
       final Map<String, dynamic> data = _handleResponse(response);
       return AttendanceRecord.fromApiJson(data);
     } on TimeoutException catch (_) {
@@ -259,7 +257,7 @@ class ApiService {
       final response = await http.post(
         uri,
         headers: await _getHeaders(includeContentType: false),
-      ).timeout(_defaultTimeout); // Added timeout
+      ).timeout(_defaultTimeout);
       final Map<String, dynamic> data = _handleResponse(response);
       return AttendanceRecord.fromApiJson(data);
     } on TimeoutException catch (_) {
@@ -284,7 +282,7 @@ class ApiService {
         uri,
         headers: await _getHeaders(),
         body: requestBody,
-      ).timeout(_defaultTimeout); // Added timeout
+      ).timeout(_defaultTimeout); 
       final Map<String, dynamic> data = _handleResponse(response);
       return AttendanceRecord.fromApiJson(data);
     } on TimeoutException catch (_) {
@@ -304,7 +302,7 @@ class ApiService {
       final response = await http.get(
         uri,
         headers: await _getHeaders(includeContentType: false),
-        ).timeout(_defaultTimeout); // Added timeout
+        ).timeout(_defaultTimeout); // timeout
       final List<dynamic> data = _handleResponse(response);
       // Add robust parsing for the list items
       return data.map((item) {
@@ -312,11 +310,7 @@ class ApiService {
               return AttendanceRecord.fromApiJson(item as Map<String, dynamic>);
           } catch (parseError) {
               if (kDebugMode) print("Error parsing individual attendance record: $parseError, Data: $item");
-              // Depending on requirements, you might:
-              // 1. Skip the record: return null and filter later (see below)
-              // 2. Throw an error to fail the whole request
-              // 3. Return a default/placeholder record
-              return null; // Option 1: Skip invalid records
+              return null; // Skip invalid records
           }
       }).whereType<AttendanceRecord>().toList(); // Filter out nulls if skipping
     } on TimeoutException catch (_) {
@@ -347,7 +341,7 @@ class ApiService {
       final response = await http.get(
         uri,
         headers: await _getHeaders(includeContentType: false),
-        ).timeout(_defaultTimeout); // Added timeout
+        ).timeout(_defaultTimeout); // timeout
       final Map<String, dynamic> data = _handleResponse(response);
 
       // Data Sanitization & Parsing

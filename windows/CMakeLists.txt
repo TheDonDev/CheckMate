@@ -2,6 +2,13 @@
 cmake_minimum_required(VERSION 3.14)
 project(checkmate_app LANGUAGES CXX)
 
+# === ADD THESE LINES TO GLOBALLY SET C++ STANDARD ===
+# Set the C++ standard required by Flutter's C++ wrappers to C++17.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF) # Recommended to disable compiler-specific extensions
+# =====================================================
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "checkmate_app")
@@ -37,11 +44,14 @@ add_definitions(-DUNICODE -D_UNICODE)
 # Be cautious about adding new options here, as plugins use this function by
 # default. In most cases, you should add new options to specific targets instead
 # of modifying this function.
+# Note: The target_compile_features line here is still good practice for targets
+# explicitly using this function, even with the global setting above.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
   target_compile_options(${TARGET} PRIVATE /EHsc)
-  target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
+  # Consider removing /WX if warnings-as-errors is too strict during development.
+  # target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0") # This disables exceptions, ensure your code/plugins handle this.
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 
@@ -91,12 +101,13 @@ endif()
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-   COMPONENT Runtime)
+   COMPONENT Runtime OPTIONAL) # Added OPTIONAL in case the dir doesn't exist
 
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
 install(CODE "
+  message(STATUS \"Removing old assets from ${INSTALL_BUNDLE_DATA_DIR}/${FLUTTER_ASSET_DIR_NAME}\")
   file(REMOVE_RECURSE \"${INSTALL_BUNDLE_DATA_DIR}/${FLUTTER_ASSET_DIR_NAME}\")
   " COMPONENT Runtime)
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
@@ -105,4 +116,5 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
-  COMPONENT Runtime)
+  COMPONENT Runtime OPTIONAL) # Added OPTIONAL in case AOT isn't built (e.g., Debug)
+

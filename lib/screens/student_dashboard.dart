@@ -1,6 +1,6 @@
 // lib/screens/student_dashboard.dart
 import 'package:checkmate/models/app_user.dart' as app_user;
-import 'package:checkmate/models/lecture.dart'; // Ensure Lecture model has DateTime? endTime
+import 'package:checkmate/models/lecture.dart'; 
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/services/auth_service.dart';
@@ -628,7 +628,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                           return Center(child: CircularProgressIndicator(color: brandColor));
                         }
 
-                        // *** UPDATED ERROR HANDLING BLOCK ***
+                        // ***  ERROR HANDLING BLOCK ***
                         if (snapshot.hasError) {
                            // Log the error for debugging
                            final error = snapshot.error;
@@ -677,7 +677,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             )
                           );
                         }
-                        // *** END UPDATED ERROR HANDLING BLOCK ***
+                        // *** END  ERROR HANDLING BLOCK ***
 
                         if (!snapshot.hasData || snapshot.data!.isEmpty) {
                            return LayoutBuilder( builder: (context, constraints) {

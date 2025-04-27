@@ -24,7 +24,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   void _handleDetection(BarcodeCapture capture) {
-    if (_isProcessing) return; // Don't process if already processing
+    if (_isProcessing) return; 
 
     final List<Barcode> barcodes = capture.barcodes;
     if (barcodes.isNotEmpty) {
@@ -82,7 +82,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               ),
             ),
           ),
-          // --- Optional: Instruction Text ---
+          // ---  Instruction Text ---
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
