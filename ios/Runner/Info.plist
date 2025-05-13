@@ -5,30 +5,61 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Checkmate App</string>
+	<string>Checkmate App</string> <!-- Your App Name -->
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string> <!-- Your Bundle ID -->
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>checkmate_app</string>
+	<string>checkmate_app</string> <!-- Your project name -->
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
+	<string>$(FLUTTER_BUILD_NAME)</string> <!-- Your app version -->
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>NSCameraUsageDescription</key>
-	<string>This app needs camera access to scan QR codes for student check-in.</string>
+	<string>$(FLUTTER_BUILD_NUMBER)</string> <!-- Your build number -->
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>This app needs access to save the QR code image to your photo library.</string>
 
+	<!-- Permissions (Existing and Added) -->
+	<key>NSCameraUsageDescription</key>
+	<string>This app needs camera access to scan QR codes for lecture check-in.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>This app needs access to save QR code images to your photo library if you choose to do so.</string>
+	<!-- Optional but Recommended: Add if you might read photos (e.g., profile pic, sharing) -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app needs access to your photo library if you choose to share images or select a profile picture.</string>
+	<!-- Required for App Tracking Transparency (ATT) prompt for ads on iOS 14+ -->
+	<key>NSUserTrackingUsageDescription</key>
+	<string>This identifier will be used to deliver personalized ads to you and help us improve the app experience.</string>
+
+	<!-- Google AdMob Configuration -->
+	<key>GADApplicationIdentifier</key>
+	<!-- IMPORTANT: Replace value with your REAL AdMob App ID before publishing! -->
+	<!-- Find your App ID in your AdMob account (App Settings) -->
+	<string>ca-app-pub-3940256099942544~1458002511</string> <!-- Test ID -->
+
+	<!-- Recommended for Ad Performance & Attribution on iOS 14+ -->
+	<key>SKAdNetworkItems</key>
+	<array>
+		<dict>
+			<key>SKAdNetworkIdentifier</key>
+			<string>cstr6suwn9.skadnetwork</string> <!-- Google -->
+		</dict>
+		<!-- Add other SKAdNetworkIdentifiers if using mediation partners -->
+		<!-- Example:
+		<dict>
+			<key>SKAdNetworkIdentifier</key>
+			<string>EXAMPLE_NETWORK_ID.skadnetwork</string>
+		</dict>
+		-->
+	</array>
+
+	<!-- Standard Flutter/iOS Settings (Existing) -->
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -50,5 +81,6 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
 </dict>
 </plist>
