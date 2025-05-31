@@ -116,7 +116,7 @@ router.post('/', checkAuth, async (req, res) => {
     const authUserEmail = req.userData.email;
     console.log(`[POST /lectures] Authenticated User: ${authUserEmail} (ID: ${authUserId})`);
 
-    const isBypassUser = authUserEmail === 'muhambe@au.ac.ke'; // Consider making this configurable
+    const isBypassUser = authUserEmail === 'muhambe@au.ac.ke'; // configurable
     let userData = null;
     let userDoc = null;
 

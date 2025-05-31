@@ -1,20 +1,20 @@
-// lib/screens/lecture_attendance_screen.dart
 import 'dart:io';
-// Needed for Uint8List
 import 'dart:async'; // Needed for TimeoutException
 import 'dart:ui' as ui;
 
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/models/attendance_record.dart'; // Ensure this path is correct
 import 'package:checkmate/services/api_service.dart';
+import 'package:checkmate/services/storage_service.dart'; // Import StorageService
 import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for Timestamp comparison
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart'; // Import path_provider
+import 'package:url_launcher/url_launcher.dart'; // Import url_launcher
 import 'package:share_plus/share_plus.dart'; // Import share_plus
-import 'package:qr_flutter/qr_flutter.dart';
 
 
 class LectureAttendanceScreen extends StatefulWidget {
@@ -28,6 +28,7 @@ class LectureAttendanceScreen extends StatefulWidget {
 
 class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   final ApiService _apiService = ApiService();
+  final StorageService _storageService = StorageService(); // Instantiate StorageService
   Future<List<AttendanceRecord>>? _attendanceFuture;
   final GlobalKey _qrKey = GlobalKey();
   bool _isProcessingExport = false; // Flag for export loading state
@@ -44,27 +45,39 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   void _loadAttendance() {
     if (!mounted) return;
     if (kDebugMode) print("[DEBUG] Fetching attendance (with percentages) for lecture ID: ${widget.lecture.id}");
+
+    // Set loading state for _attendanceFuture, clear list for UI consistency during load
     setState(() {
-      // Clear previous sorted list while loading new data
-      _sortedAttendanceList = [];
-      _attendanceFuture = _apiService.getLectureAttendance(widget.lecture.id)
-          .then((records) {
-            if (mounted) {
-              // Sort the records immediately after fetching
-              _sortAttendanceList(records);
-              _sortedAttendanceList = records; // Store the sorted list
-              if (kDebugMode) print("[DEBUG] Attendance loaded and sorted. Count: ${_sortedAttendanceList.length}");
-            }
-            return _sortedAttendanceList; // Return the sorted list for the FutureBuilder
-          })
-          .catchError((error) {
-             if (mounted) {
-                _sortedAttendanceList = []; // Clear list on error
-             }
-             if (kDebugMode) print("[DEBUG] Error caught in _loadAttendance chain: $error");
-             throw error; // Re-throw for FutureBuilder
-          });
+      _sortedAttendanceList = []; 
+      _attendanceFuture = null; // Explicitly nullify to ensure FutureBuilder shows loading
     });
+
+    _attendanceFuture = _apiService.getLectureAttendance(widget.lecture.id)
+        .then((records) {
+          if (mounted) {
+            _sortAttendanceList(records);
+            // Update the state with the fetched and sorted records
+            setState(() { 
+              _sortedAttendanceList = records;
+            });
+            if (kDebugMode) print("[DEBUG] Attendance loaded and sorted. _sortedAttendanceList.length: ${_sortedAttendanceList.length}");
+          }
+          return records; // Return records for FutureBuilder
+        })
+        .catchError((error) {
+           if (mounted) {
+              setState(() { 
+                _sortedAttendanceList = []; // Clear list on error
+              });
+           }
+           if (kDebugMode) print("[DEBUG] Error caught in _loadAttendance chain: $error");
+           throw error; // Re-throw for FutureBuilder
+        });
+    
+    // Trigger a rebuild for FutureBuilder to pick up the new future instance.
+    if (mounted) {
+        setState(() {});
+    }
   }
 
   // Helper function to sort the attendance list consistently
@@ -135,13 +148,13 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     return buffer.toString();
   }
 
-  Future<void> _exportAttendanceCsv() async {
+  Future<String?> _exportAttendanceCsv() async {
     
     if (kDebugMode) print("[DEBUG] _exportAttendanceCsv called.");
 
     if (_isProcessingExport || _sortedAttendanceList.isEmpty) {
        if(kDebugMode) print("[DEBUG] Export skipped: Processing=$_isProcessingExport, ListEmpty=${_sortedAttendanceList.isEmpty}");
-       return;
+       return null;
     }
 
     if(kDebugMode) print("[DEBUG] Starting CSV export process...");
@@ -174,41 +187,52 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
           throw Exception("Failed to write CSV file or file is empty.");
       }
 
-
-      final xFile = XFile(filePath);
-      if (kDebugMode) print('[DEBUG] XFile created for sharing: ${xFile.path}');
-
       if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
-           const SnackBar(content: Text('CSV file created. Opening share options...'), duration: Duration(seconds: 2)),
+           const SnackBar(content: Text('CSV file created. Uploading to cloud...'), duration: Duration(seconds: 3)),
          );
-         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      if (kDebugMode) print('[DEBUG] Initiating Share.shareXFiles...');
-      final result = await Share.shareXFiles(
-        [xFile],
-        text: 'Attendance record for ${widget.lecture.unitName} (${widget.lecture.unitCode}) on ${widget.lecture.formattedDate}.',
-        subject: 'Attendance: ${widget.lecture.unitCode} - ${widget.lecture.formattedDate}',
-      );
-    
-      if (kDebugMode) print('[DEBUG] Share result: Status=${result.status}, Raw=${result.raw}');
+      // Upload the file to Firebase Storage
+      final String storagePath = 'attendance_records/${widget.lecture.id}'; // e.g., attendance_records/lectureId/filename.csv
+      if (kDebugMode) print('[DEBUG] Uploading $fileName to $storagePath...');
+      final String? downloadUrl = await _storageService.uploadFile(storagePath, fileName, await file.readAsBytes());
 
-      if (mounted) {
-        if (result.status == ShareResultStatus.success) {
+      if (downloadUrl != null) {
+        if (kDebugMode) print("[DEBUG] File uploaded successfully. Download URL: $downloadUrl");
+        if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
-             SnackBar(content: Text('Attendance file shared/saved successfully.'), backgroundColor: Colors.green.shade600),
+             SnackBar(
+                content: Text('Attendance CSV uploaded!'),
+                backgroundColor: Colors.green.shade600,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'DOWNLOAD',
+                  textColor: Colors.white,
+                  onPressed: () async {
+                    if (await canLaunchUrl(Uri.parse(downloadUrl))) {
+                      await launchUrl(Uri.parse(downloadUrl));
+                    } else {
+                      if (kDebugMode) print('[DEBUG] Could not launch $downloadUrl');
+                       ScaffoldMessenger.of(context).showSnackBar(
+                         SnackBar(content: Text('Could not open download link.'), backgroundColor: Colors.red.shade400),
+                       );
+                    }
+                  },
+                ),
+              ),
            );
-        } else if (result.status == ShareResultStatus.dismissed) {
-          if (kDebugMode) print('[DEBUG] Share sheet dismissed by user.');
-          // Optionally show a less prominent message like:
-          // ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share cancelled.'), duration: Duration(seconds: 2)));
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not complete share action: ${result.status}'), backgroundColor: Colors.orange),
-          );
+          if (kDebugMode) print("[DEBUG] File upload failed or downloadUrl is null.");
+           if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+               SnackBar(content: Text('Failed to upload attendance file.'), backgroundColor: Colors.red.shade600),
+             );
+           }
         }
+        return downloadUrl; // Return the URL on success
       }
+      return null; // Return null on failure to upload
 
     } catch (e, s) { // Catch stack trace as well
       if (kDebugMode) {
@@ -220,6 +244,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
           SnackBar(content: Text('Error creating attendance file: ${e.toString()}'), backgroundColor: Colors.red),
         );
       }
+      return null; // Return null on error
     } finally {
       if (mounted) {
         if (kDebugMode) print("[DEBUG] CSV export process finished.");
@@ -437,7 +462,11 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                        ? null
                        : () { // Wrap in lambda to add logging
                            if (kDebugMode) print("[DEBUG] Export button tapped!");
-                           _exportAttendanceCsv();
+                           _exportAttendanceCsv().then((url) {
+                              if (url == null && mounted) {
+                                // Optionally show a generic failure message if not handled by specific errors in _exportAttendanceCsv
+                              }
+                           });
                          },
           ),
           // --- End Export Button ---
@@ -574,4 +603,3 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     );
   }
 }
-
