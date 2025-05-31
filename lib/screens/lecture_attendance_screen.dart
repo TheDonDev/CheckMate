@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async'; // Needed for TimeoutException
+import 'dart:convert'; // For utf8.encode
 import 'dart:ui' as ui;
 
 import 'package:checkmate/models/lecture.dart';
@@ -48,7 +49,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
 
     // Set loading state for _attendanceFuture, clear list for UI consistency during load
     setState(() {
-      _sortedAttendanceList = []; 
+      _sortedAttendanceList = [];
       _attendanceFuture = null; // Explicitly nullify to ensure FutureBuilder shows loading
     });
 
@@ -57,7 +58,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
           if (mounted) {
             _sortAttendanceList(records);
             // Update the state with the fetched and sorted records
-            setState(() { 
+            setState(() {
               _sortedAttendanceList = records;
             });
             if (kDebugMode) print("[DEBUG] Attendance loaded and sorted. _sortedAttendanceList.length: ${_sortedAttendanceList.length}");
@@ -66,14 +67,14 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
         })
         .catchError((error) {
            if (mounted) {
-              setState(() { 
+              setState(() {
                 _sortedAttendanceList = []; // Clear list on error
               });
            }
            if (kDebugMode) print("[DEBUG] Error caught in _loadAttendance chain: $error");
            throw error; // Re-throw for FutureBuilder
         });
-    
+
     // Trigger a rebuild for FutureBuilder to pick up the new future instance.
     if (mounted) {
         setState(() {});
@@ -149,7 +150,6 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   }
 
   Future<String?> _exportAttendanceCsv() async {
-    
     if (kDebugMode) print("[DEBUG] _exportAttendanceCsv called.");
 
     if (_isProcessingExport || _sortedAttendanceList.isEmpty) {
@@ -161,78 +161,92 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     setState(() { _isProcessingExport = true; });
 
     try {
-     
       if (kDebugMode) print("[DEBUG] Generating CSV data...");
-      // This call is now valid because _generateCsvData is defined above
       final String csvData = _generateCsvData(_sortedAttendanceList);
+      final Uint8List csvBytes = utf8.encode(csvData); // Convert String to Uint8List
 
-     
-      if (kDebugMode) print("[DEBUG] Getting temporary directory...");
-      final tempDir = await getTemporaryDirectory();
       final safeUnitCode = widget.lecture.unitCode.replaceAll(RegExp(r'[^\w\.-]+'), '_');
       final safeUnitName = widget.lecture.unitName.replaceAll(RegExp(r'[^\w\.-]+'), '_');
       final dateStamp = DateFormat('yyyyMMdd').format(widget.lecture.startTime?.toLocal() ?? DateTime.now());
       final fileName = 'Attendance_${safeUnitCode}_${safeUnitName}_$dateStamp.csv';
-      final filePath = '${tempDir.path}/$fileName';
-      final file = File(filePath);
-      if (kDebugMode) print('[DEBUG] Target file path: $filePath');
+      final String storagePath = 'attendance_records/${widget.lecture.id}'; // e.g., attendance_records/lectureId/filename.csv
 
-      if (kDebugMode) print('[DEBUG] Writing CSV data to file...');
-      await file.writeAsString(csvData, flush: true);
-      final fileExists = await file.exists();
-      final fileLength = fileExists ? await file.length() : -1;
-      if (kDebugMode) print('[DEBUG] CSV file write complete. Exists: $fileExists, Length: $fileLength bytes');
+      String? downloadUrl;
 
-      if (!fileExists || fileLength <= 0) {
-          throw Exception("Failed to write CSV file or file is empty.");
-      }
-
+      // Show a generic "preparing" message before platform-specific logic
       if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
-           const SnackBar(content: Text('CSV file created. Uploading to cloud...'), duration: Duration(seconds: 3)),
+           const SnackBar(content: Text('Preparing attendance data for upload...'), duration: Duration(seconds: 2)),
          );
       }
 
-      // Upload the file to Firebase Storage
-      final String storagePath = 'attendance_records/${widget.lecture.id}'; // e.g., attendance_records/lectureId/filename.csv
-      if (kDebugMode) print('[DEBUG] Uploading $fileName to $storagePath...');
-      final String? downloadUrl = await _storageService.uploadFile(storagePath, fileName, await file.readAsBytes());
+      if (kIsWeb) {
+        // Web platform: Upload bytes directly
+        if (kDebugMode) print('[DEBUG] Web platform detected. Uploading $fileName to $storagePath directly with bytes.');
+        downloadUrl = await _storageService.uploadFile(storagePath, fileName, csvBytes);
+      } else {
+        // Native platforms: Use existing file-based logic
+        if (kDebugMode) print("[DEBUG] Native platform. Getting temporary directory...");
+        final tempDir = await getTemporaryDirectory();
+        final filePath = '${tempDir.path}/$fileName';
+        final file = File(filePath);
+        if (kDebugMode) print('[DEBUG] Target file path (native): $filePath');
+
+        if (kDebugMode) print('[DEBUG] Writing CSV data to file (native)...');
+        await file.writeAsBytes(csvBytes, flush: true); // Using writeAsBytes for consistency
+        final fileExists = await file.exists();
+        final fileLength = fileExists ? await file.length() : -1;
+        if (kDebugMode) print('[DEBUG] CSV file write complete (native). Exists: $fileExists, Length: $fileLength bytes');
+
+        if (!fileExists || fileLength <= 0) {
+            throw Exception("Failed to write CSV file or file is empty (native).");
+        }
+        
+        if (kDebugMode) print('[DEBUG] Uploading $fileName from $filePath to $storagePath (native)...');
+        downloadUrl = await _storageService.uploadFile(storagePath, fileName, await file.readAsBytes());
+      }
+
 
       if (downloadUrl != null) {
         if (kDebugMode) print("[DEBUG] File uploaded successfully. Download URL: $downloadUrl");
         if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
              SnackBar(
-                content: Text('Attendance CSV uploaded!'),
+                content: const Text('Attendance CSV uploaded!'),
                 backgroundColor: Colors.green.shade600,
                 duration: const Duration(seconds: 5),
                 action: SnackBarAction(
                   label: 'DOWNLOAD',
                   textColor: Colors.white,
                   onPressed: () async {
-                    if (await canLaunchUrl(Uri.parse(downloadUrl))) {
-                      await launchUrl(Uri.parse(downloadUrl));
-                    } else {
-                      if (kDebugMode) print('[DEBUG] Could not launch $downloadUrl');
-                       ScaffoldMessenger.of(context).showSnackBar(
-                         SnackBar(content: Text('Could not open download link.'), backgroundColor: Colors.red.shade400),
-                       );
+                    // Ensure downloadUrl is not null before using it
+                    if (downloadUrl != null) {
+                      if (await canLaunchUrl(Uri.parse(downloadUrl))) {
+                        await launchUrl(Uri.parse(downloadUrl));
+                      } else {
+                        if (kDebugMode) print('[DEBUG] Could not launch $downloadUrl');
+                        if (mounted) { // Check mounted again inside async callback
+                           ScaffoldMessenger.of(context).showSnackBar(
+                             SnackBar(content: const Text('Could not open download link.'), backgroundColor: Colors.red.shade400),
+                           );
+                        }
+                      }
                     }
                   },
                 ),
               ),
            );
-        } else {
-          if (kDebugMode) print("[DEBUG] File upload failed or downloadUrl is null.");
-           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(
-               SnackBar(content: Text('Failed to upload attendance file.'), backgroundColor: Colors.red.shade600),
-             );
-           }
         }
         return downloadUrl; // Return the URL on success
+      } else { // downloadUrl is null
+        if (kDebugMode) print("[DEBUG] File upload failed or downloadUrl is null.");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: const Text('Failed to upload attendance file.'), backgroundColor: Colors.red.shade600),
+          );
+        }
+        return null; // Return null on failure to upload
       }
-      return null; // Return null on failure to upload
 
     } catch (e, s) { // Catch stack trace as well
       if (kDebugMode) {
@@ -241,7 +255,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error creating attendance file: ${e.toString()}'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error processing attendance file: ${e.toString()}'), backgroundColor: Colors.red),
         );
       }
       return null; // Return null on error
@@ -254,7 +268,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   }
   // --- End CSV Export Logic ---
 
-  // --- _captureAndShareQrCode --- 
+  // --- _captureAndShareQrCode ---
   Future<void> _captureAndShareQrCode() async {
     try {
       if (_qrKey.currentContext == null) { throw Exception("QR Code context not found."); }
@@ -263,16 +277,25 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) { throw Exception("Could not get byte data from QR code image."); }
       Uint8List pngBytes = byteData.buffer.asUint8List();
-      final tempDir = await getTemporaryDirectory();
+
       final safeUnitCode = widget.lecture.unitCode.replaceAll(RegExp(r'[^\w\.-]+'), '_');
       final safeUnitName = widget.lecture.unitName.replaceAll(RegExp(r'[^\w\.-]+'), '_');
       final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
       final fileName = 'QRCode_${safeUnitCode}_${safeUnitName}_$timestamp.png';
-      final file = File('${tempDir.path}/$fileName');
-      await file.writeAsBytes(pngBytes);
-      if (kDebugMode) print('[DEBUG] QR Code saved temporarily to: ${file.path}');
 
-      final xFile = XFile(file.path);
+      final XFile xFile;
+      if (kIsWeb) {
+        if (kDebugMode) print('[DEBUG] Web platform: Creating XFile for QR code from data.');
+        xFile = XFile.fromData(pngBytes, name: fileName, mimeType: 'image/png', lastModified: DateTime.now());
+      } else {
+        if (kDebugMode) print('[DEBUG] Native platform: Saving QR code to temporary file.');
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/$fileName');
+        await file.writeAsBytes(pngBytes);
+        if (kDebugMode) print('[DEBUG] QR Code saved temporarily to: ${file.path}');
+        xFile = XFile(file.path);
+      }
+
       final result = await Share.shareXFiles(
         [xFile],
         text: 'QR Code for ${widget.lecture.unitName} (${widget.lecture.unitCode}) lecture check-in.',
