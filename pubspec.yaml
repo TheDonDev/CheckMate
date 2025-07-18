@@ -1,0 +1,81 @@
+name: checkmate
+description: "CheckMate is a mobile application designed to streamline student class attendance management in universities. Built with Flutter (Dart) for the frontend and Node.js for the backend, CheckMate provides a user-friendly and efficient solution for both lecturers and students to manage attendance digitally."
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0' # Updated SDK constraint to be more typical
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # General dependencies
+  intl: ^0.20.2 # Use latest compatible version (check pub.dev)
+  cupertino_icons: ^1.0.8
+  http: ^1.1.0 # Keep as is or update if needed
+  mobile_scanner: ^7.0.1 # Keep as is or update if needed
+  qr_flutter: ^4.1.0
+  collection: ^1.17.0 # Keep as is or update if needed
+  permission_handler: ^12.0.1 # Keep as is or update if needed
+  path_provider: ^2.0.0 # Keep as is or update if needed
+  url_launcher: ^6.2.6 # <--- ADDED for Contact Support
+  in_app_purchase: ^3.1.10
+  google_mobile_ads: ^6.0.0
+
+  # Firebase dependencies (Consider updating to latest major versions if compatible)
+  firebase_core: ^3.13.0 # Or latest compatible
+  firebase_auth: ^5.5.2 # Or latest compatible
+  cloud_firestore: ^5.6.6 # Or latest compatible
+  cloud_functions: ^5.1.0
+  firebase_storage: ^12.4.5 # Or latest compatible
+  firebase_database: ^11.0.0 # <-- ADDED Firebase Realtime Database (check pub.dev for latest)
+  firebase_messaging: ^15.2.5 # Keep this version for now due to the conflict source
+  firebase_performance: ^0.10.1+5 # Or latest compatible
+  firebase_remote_config: ^5.4.3 # Or latest compatible
+  firebase_analytics: ^11.4.5 # Or latest compatible
+  provider: ^6.1.1 # Or latest compatible
+
+  # --- CORRECTED share_plus VERSION ---
+  share_plus: ^11.0.0 # Updated as suggested by the error message
+
+flutter_lints: ^4.0.0 # Updated lints
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/image.png
+    - assets/images/WorkStationDay.jpg
+    - assets/images/WorkStationLine.jpg
+    - assets/images/WorkStationNight.jpg
+    - assets/images/WorkStationLine2.jpg
+    - assets/images/Alupe-.jpeg
+    - assets/images/MV3.jpg
+    - assets/images/nai3.jpg
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.4 # Use latest compatible version (check pub.dev)
+
+# flutter_launcher_icons configuration remains the same
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/CheckMate_Icon.jpg" # icon path
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/images/CheckMate_Icon.jpg"
+    background_color: "#0175C2"
+    theme_color: "#0175C2"
+  windows:
+    generate: true
+    image_path: "assets/images/CheckMate_Icon.jpg"
+    icon_size: 48
+  macos:
+    generate: true
+    image_path: "assets/images/CheckMate_Icon.jpg"
+

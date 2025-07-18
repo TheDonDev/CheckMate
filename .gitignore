@@ -10,7 +10,7 @@ build/
 # Android
 #android/
 #android/.gradle/
-#android/app/build/
+android/app/build/
 #android/local.properties
 
 # iOS
@@ -30,8 +30,6 @@ ios/Flutter/Flutter.framework
 serviceAccountKey.json
 google-services.json
 GoogleService-Info.plist
-firebase.js
-pubspec.yaml
 
 # Error logs
 hs_err_pid*.log
