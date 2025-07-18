@@ -8,10 +8,10 @@ build/
 *.metadata
 
 # Android
-android/
-android/.gradle/
-android/app/build/
-android/local.properties
+#android/
+#android/.gradle/
+#android/app/build/
+#android/local.properties
 
 # iOS
 ios/Pods/
