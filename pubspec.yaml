@@ -54,6 +54,7 @@ flutter:
     - assets/images/Alupe-.jpeg
     - assets/images/MV3.jpg
     - assets/images/nai3.jpg
+    - assets/images/CheckMate_Icon.jpg
 
 dev_dependencies:
   flutter_test:
