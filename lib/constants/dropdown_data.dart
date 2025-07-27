@@ -40,7 +40,7 @@ const Map<String, List<String>> departmentsMap = {
 /// Values are lists of course names offered in that school.
 const Map<String, List<String>> coursesMap = {
   "School of Health Sciences": [
-    "Master’s in Public Health",
+    "Master's in Public Health",
     "Msc Medical Microbiology",
     "Bachelor of Science Medical Laboratory Sciences",
     "Bachelor of Science Medical Psychology",

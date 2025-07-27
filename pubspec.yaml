@@ -66,7 +66,7 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/images/CheckMate_Icon.jpg" # icon path
-  min_sdk_android: 21
+  min_sdk_android: 23
   web:
     generate: true
     image_path: "assets/images/CheckMate_Icon.jpg"
@@ -79,4 +79,3 @@ flutter_launcher_icons:
   macos:
     generate: true
     image_path: "assets/images/CheckMate_Icon.jpg"
-
