@@ -9,6 +9,7 @@ import 'package:checkmate/models/app_user.dart' as app_user;
 // Import dashboards directly
 import 'package:checkmate/screens/student_dashboard.dart';
 import 'package:checkmate/screens/lecturer_dashboard.dart';
+import 'package:checkmate/screens/admin_dashboard.dart';
 import 'package:provider/provider.dart'; // Import Provider
 import 'package:url_launcher/url_launcher.dart'; // Import url_launcher
 
@@ -127,14 +128,27 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       );
       if (!mounted) return;
       if (user != null) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => user.role == 'lecturer'
-                ? LecturerDashboard(currentUser: user)
-                : StudentDashboard(currentUser: user),
-          ),
-        );
+        switch (user.role) {
+          case 'admin':
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => AdminDashboard(currentUser: user)),
+            );
+            break;
+          case 'lecturer':
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => LecturerDashboard(currentUser: user)),
+            );
+            break;
+          case 'student':
+          default: // Default to student dashboard
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => StudentDashboard(currentUser: user)),
+            );
+            break;
+        }
         return;
       } else {
          _showSnackBar('Login failed: Could not retrieve user details.');

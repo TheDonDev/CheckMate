@@ -8,7 +8,7 @@ class User {
   final String name;
   final String email;
   final String phoneNumber; 
-  final String role; // 'student' or 'lecturer'
+  final String role; // 'student', 'lecturer', or 'admin'
   final bool isVerified; 
   final String? school;
   final String? department;

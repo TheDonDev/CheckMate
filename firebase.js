@@ -5,7 +5,7 @@ const serviceAccount = require('./serviceAccountKey.json'); // Service account k
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  // databaseURL: 'https://your-firebase-project.firebaseio.com' // If you need Realtime Database
+  databaseURL: 'https://checkmate-1eba2.firebaseio.com' // If you need Realtime Database
 });
 
 const db = admin.firestore();

@@ -21,7 +21,9 @@ class AuthService extends ChangeNotifier {
   final String _usersCollection = 'users'; // Use a constant for collection name
 
   // --- Add the special user email constant ---
-  static const String _specialBypassEmail = "muhambe@au.ac.ke";
+  static const String _specialBypassEmail = "donaldmwanga33@gmail.com";
+  static const String _specialBypassName = "DONALD MWANGA";
+
 
   app_user.User? _currentUser; // Cache the current user model
   app_user.User? get currentUser => _currentUser;
@@ -137,9 +139,9 @@ class AuthService extends ChangeNotifier {
     required String email,
     required String password,
     required String phoneNumber, // Expecting +254 format
-    required String? school,
-    required String? department,
-    required String? course,
+    String? school,
+    String? department,
+    String? course,
     String? registrationNumber,
     String? yearOfStudy,
     String? semester,
@@ -153,11 +155,13 @@ class AuthService extends ChangeNotifier {
     final trimmedYearOfStudy = yearOfStudy?.trim();
     final trimmedSemester = semester?.trim();
 
+    final bool isAdmin = trimmedEmail == _specialBypassEmail && trimmedName.toUpperCase() == _specialBypassName;
+
     // Validate required fields (use trimmed versions where applicable)
-    if (trimmedName.isEmpty || trimmedEmail.isEmpty || password.isEmpty || trimmedPhoneNumber.isEmpty ||
+    if (!isAdmin && (trimmedName.isEmpty || trimmedEmail.isEmpty || password.isEmpty || trimmedPhoneNumber.isEmpty ||
         school == null || school.trim().isEmpty ||
         department == null || department.trim().isEmpty ||
-        course == null || course.trim().isEmpty) {
+        course == null || course.trim().isEmpty)) {
        throw AuthException('Please fill in all required fields (Name, Email, Phone, School, Department, Course).');
     }
 
@@ -170,19 +174,19 @@ class AuthService extends ChangeNotifier {
 
       if (firebaseUser != null) {
         // Send verification email (best effort), *unless* it's the special user
-        if (!firebaseUser.emailVerified && trimmedEmail != _specialBypassEmail) {
+        if (!firebaseUser.emailVerified && !isAdmin) {
            try {
               await firebaseUser.sendEmailVerification();
               print("Verification email sent to $trimmedEmail");
            } catch (e) {
               print("Error sending verification email: $e"); // Log error but continue
            }
-        } else if (trimmedEmail == _specialBypassEmail) {
+        } else if (isAdmin) {
             print("Skipping verification email for special user: $trimmedEmail");
         }
 
         final bool isStudent = trimmedEmail.endsWith('@student.au.ac.ke');
-        final String role = isStudent ? 'student' : 'lecturer'; // Role likely lowercase
+        final String role = isAdmin ? 'admin' : (isStudent ? 'student' : 'lecturer'); // Role likely lowercase
 
         // Validate student-specific fields (use trimmed versions)
         if (isStudent && (trimmedRegNumber == null || trimmedRegNumber.isEmpty || trimmedYearOfStudy == null || trimmedYearOfStudy.isEmpty || trimmedSemester == null || trimmedSemester.isEmpty)) {
@@ -190,7 +194,7 @@ class AuthService extends ChangeNotifier {
         }
 
         // Set isVerified true ONLY for the special user during signup
-        final bool initialVerificationStatus = (trimmedEmail == _specialBypassEmail);
+        final bool initialVerificationStatus = isAdmin;
 
         // --- MODIFICATION: Apply .toUpperCase() to specific fields before saving ---
         Map<String, dynamic> userData = {
@@ -199,9 +203,9 @@ class AuthService extends ChangeNotifier {
           'email': trimmedEmail, // Save email in lowercase
           'phoneNumber': trimmedPhoneNumber, // Save phone number as trimmed
           'role': role, // Save role as determined (likely lowercase)
-          'school': school.trim().toUpperCase(), // Save school trimmed & uppercase
-          'department': department.trim().toUpperCase(), // Save department trimmed & uppercase
-          'course': course.trim().toUpperCase(), // Save course trimmed & uppercase
+          'school': school?.trim().toUpperCase(), // Save school trimmed & uppercase
+          'department': department?.trim().toUpperCase(), // Save department trimmed & uppercase
+          'course': course?.trim().toUpperCase(), // Save course trimmed & uppercase
           'createdAt': FieldValue.serverTimestamp(),
           'isVerified': initialVerificationStatus,
           // Save registration number in uppercase only if student and provided

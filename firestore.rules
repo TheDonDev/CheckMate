@@ -2,14 +2,48 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow users to read/write their own user document
+
+    // Function to check if the user is an admin
+    function isAdmin() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Rules for the 'users' collection
     match /users/{userId} {
+      // Admins can read and write all user documents
+      allow read, write: if isAdmin();
+      // Users can read and write their own document
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+
+    // Rules for other collections, accessible only by admin
+    match /schools/{schoolId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /venues/{venueId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /departments/{departmentId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /courses/{courseId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /years_of_study/{yearId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /semesters/{semesterId} {
+      allow read, write: if isAdmin();
+    }
     
-    // Default deny-all rule
-    match /{document=**} {
-      allow read, write: if false;
+    //Lectures collection rules
+    match /lectures/{lectureId} {
+        allow read, write: if request.auth != null;
     }
   }
 }

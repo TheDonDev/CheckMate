@@ -44,6 +44,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _selectedSemester;
   bool _isLoading = false;
   bool _isStudent = false; // Determined by email domain
+  bool _isAdmin = false; // Determined by admin email
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -55,13 +56,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void initState() {
     super.initState();
-    // Listen to email changes to determine if user is a student
-    _emailController.addListener(_checkEmailDomain);
+    // Listen to email changes to determine user type (student or admin)
+    _emailController.addListener(_checkEmailStatus);
   }
 
   @override
   void dispose() {
-    _emailController.removeListener(_checkEmailDomain);
+    _emailController.removeListener(_checkEmailStatus);
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
@@ -71,24 +72,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  // Check email domain to show/hide student-specific fields
-  void _checkEmailDomain() {
+  // Check email to determine user type and update UI accordingly
+  void _checkEmailStatus() {
     final email = _emailController.text.trim().toLowerCase();
-    // Only emails ending with @student.au.ac.ke are considered student emails
     final bool isStudentEmail = email.endsWith('@student.au.ac.ke');
+    final bool isAdminEmail = email == 'donaldmwanga33@gmail.com';
 
-    // Update state only if the student status changes
-    // Use mounted check before calling setState
-    if (mounted && _isStudent != isStudentEmail) {
+    if (mounted && (_isStudent != isStudentEmail || _isAdmin != isAdminEmail)) {
       setState(() {
         _isStudent = isStudentEmail;
-        // If the user is NOT a student, clear student-specific fields
-        if (!isStudentEmail) {
+        _isAdmin = isAdminEmail;
+
+        // Clear student-specific fields if not a student
+        if (!_isStudent) {
           _registrationNumberController.clear();
           _selectedYearOfStudy = null;
           _selectedSemester = null;
         }
-        // Trigger re-validation if needed, especially for student fields
+        // Trigger re-validation for the whole form
         _formKey.currentState?.validate();
       });
     }
@@ -138,9 +139,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         email: email,
         password: password,
         phoneNumber: phoneNumber,
-        school: _selectedSchool, // Required for all users
-        department: _selectedDepartment, // Required for all users
-        course: _selectedCourse, // Required for all users
+        school: _selectedSchool,
+        department: _selectedDepartment,
+        course: _selectedCourse,
         // Pass student-specific data only if the user is a student
         registrationNumber: registrationNumber,
         yearOfStudy: yearOfStudy,
@@ -338,9 +339,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       return 'Please enter a valid email address';
                     }
                     // *** UPDATED DOMAIN VALIDATION ***
-                    // Check if the email ends with one of the allowed university domains
+                    // Check if the email ends with one of the allowed university domains or is the admin email
                     final allowedDomains = ['@student.au.ac.ke', '@au.ac.ke', '@kibu.ac.ke'];
-                    bool isValidDomain = allowedDomains.any((domain) => email.endsWith(domain));
+                    bool isValidDomain = allowedDomains.any((domain) => email.endsWith(domain)) || email == 'donaldmwanga33@gmail.com';
 
                     if (!isValidDomain) {
                       return 'Use a valid university email (@student.au.ac.ke, @au.ac.ke, or @kibu.ac.ke)';
@@ -513,92 +514,94 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 18),
 
-                // --- School/Dept/Course Dropdowns (Visible and Required for everyone) ---
-                DropdownButtonFormField<String>(
-                  decoration: inputDecoration(
-                    'School',
-                    prefixIcon: Icon(Icons.school_outlined, color: brandColor.withOpacity(0.7)),
+                // --- School/Dept/Course Dropdowns (Visible unless admin) ---
+                if (!_isAdmin) ...[
+                  DropdownButtonFormField<String>(
+                    decoration: inputDecoration(
+                      'School',
+                      prefixIcon: Icon(Icons.school_outlined, color: brandColor.withOpacity(0.7)),
+                    ),
+                    value: _selectedSchool,
+                    items: schoolsList.map((String school) {
+                      return DropdownMenuItem<String>(value: school, child: Text(school, overflow: TextOverflow.ellipsis));
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (mounted) {
+                        setState(() {
+                          _selectedSchool = newValue;
+                          _selectedDepartment = null; // Reset dependent dropdowns
+                          _selectedCourse = null;
+                        });
+                        // Trigger re-validation if needed
+                        _formKey.currentState?.validate();
+                      }
+                    },
+                    validator: (value) => !_isAdmin && value == null ? 'Please select your school' : null,
+                    isExpanded: true,
                   ),
-                  value: _selectedSchool,
-                  items: schoolsList.map((String school) {
-                    return DropdownMenuItem<String>(value: school, child: Text(school, overflow: TextOverflow.ellipsis));
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    if (mounted) {
-                      setState(() {
-                        _selectedSchool = newValue;
-                        _selectedDepartment = null; // Reset dependent dropdowns
-                        _selectedCourse = null;
-                      });
-                      // Trigger re-validation if needed
-                      _formKey.currentState?.validate();
-                    }
-                  },
-                  validator: (value) => value == null ? 'Please select your school' : null,
-                  isExpanded: true,
-                ),
-                const SizedBox(height: 18),
+                  const SizedBox(height: 18),
 
-                // Department Dropdown
-                DropdownButtonFormField<String>(
-                  decoration: inputDecoration(
-                    'Department',
-                    hint: _selectedSchool == null ? 'Select school first' : 'Select your department',
-                    prefixIcon: Icon(Icons.business_outlined, color: brandColor.withOpacity(0.7)),
+                  // Department Dropdown
+                  DropdownButtonFormField<String>(
+                    decoration: inputDecoration(
+                      'Department',
+                      hint: _selectedSchool == null ? 'Select school first' : 'Select your department',
+                      prefixIcon: Icon(Icons.business_outlined, color: brandColor.withOpacity(0.7)),
+                    ),
+                    value: _selectedDepartment,
+                    disabledHint: _selectedSchool == null ? const Text('Select school first') : null,
+                    // Enable/disable and populate based on school selection
+                    items: (_selectedSchool != null && departmentsMap.containsKey(_selectedSchool))
+                        ? departmentsMap[_selectedSchool]!.map((String department) {
+                            return DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis));
+                          }).toList()
+                        : [], // Empty list if no school selected or school not in map
+                    onChanged: (_selectedSchool == null || !departmentsMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
+                      if (mounted) {
+                        setState(() {
+                          _selectedDepartment = newValue;
+                          _selectedCourse = null; // Reset course when department changes
+                        });
+                        // Trigger re-validation if needed
+                        _formKey.currentState?.validate();
+                      }
+                    },
+                    // Validation applies only if a school is selected
+                    validator: (value) => !_isAdmin && _selectedSchool != null && value == null ? 'Please select your department' : null,
+                    isExpanded: true,
                   ),
-                  value: _selectedDepartment,
-                  disabledHint: _selectedSchool == null ? const Text('Select school first') : null,
-                  // Enable/disable and populate based on school selection
-                  items: (_selectedSchool != null && departmentsMap.containsKey(_selectedSchool))
-                      ? departmentsMap[_selectedSchool]!.map((String department) {
-                          return DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis));
-                        }).toList()
-                      : [], // Empty list if no school selected or school not in map
-                  onChanged: (_selectedSchool == null || !departmentsMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
-                    if (mounted) {
-                      setState(() {
-                        _selectedDepartment = newValue;
-                        _selectedCourse = null; // Reset course when department changes
-                      });
-                      // Trigger re-validation if needed
-                      _formKey.currentState?.validate();
-                    }
-                  },
-                  // Validation applies only if a school is selected
-                  validator: (value) => _selectedSchool != null && value == null ? 'Please select your department' : null,
-                  isExpanded: true,
-                ),
-                const SizedBox(height: 18),
+                  const SizedBox(height: 18),
 
-                // Course Dropdown
-                DropdownButtonFormField<String>(
-                  decoration: inputDecoration(
-                    'Course', // Label remains 'Course' for simplicity, applicable to lecturer's primary course area too
-                     hint: _selectedDepartment == null ? 'Select department first' : 'Select your course',
-                     prefixIcon: Icon(Icons.book_outlined, color: brandColor.withOpacity(0.7)),
+                  // Course Dropdown
+                  DropdownButtonFormField<String>(
+                    decoration: inputDecoration(
+                      'Course', // Label remains 'Course' for simplicity, applicable to lecturer's primary course area too
+                       hint: _selectedDepartment == null ? 'Select department first' : 'Select your course',
+                       prefixIcon: Icon(Icons.book_outlined, color: brandColor.withOpacity(0.7)),
+                    ),
+                    value: _selectedCourse,
+                    disabledHint: _selectedDepartment == null ? const Text('Select department first') : null,
+                    // Enable/disable and populate based on school selection (courses are mapped by school)
+                    items: (_selectedSchool != null && coursesMap.containsKey(_selectedSchool))
+                        ? coursesMap[_selectedSchool]!.map((String course) {
+                            return DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis));
+                          }).toList()
+                        : [], // Empty list if no school selected or school not in map
+                    onChanged: (_selectedSchool == null || _selectedDepartment == null || !coursesMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
+                      if (mounted) {
+                        setState(() {
+                          _selectedCourse = newValue;
+                        });
+                        // Trigger re-validation if needed
+                        _formKey.currentState?.validate();
+                      }
+                    },
+                    // Validation applies only if a department is selected
+                    validator: (value) => !_isAdmin && _selectedDepartment != null && value == null ? 'Please select your course' : null,
+                    isExpanded: true,
                   ),
-                  value: _selectedCourse,
-                  disabledHint: _selectedDepartment == null ? const Text('Select department first') : null,
-                  // Enable/disable and populate based on school selection (courses are mapped by school)
-                  items: (_selectedSchool != null && coursesMap.containsKey(_selectedSchool))
-                      ? coursesMap[_selectedSchool]!.map((String course) {
-                          return DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis));
-                        }).toList()
-                      : [], // Empty list if no school selected or school not in map
-                  onChanged: (_selectedSchool == null || _selectedDepartment == null || !coursesMap.containsKey(_selectedSchool)) ? null : (String? newValue) {
-                    if (mounted) {
-                      setState(() {
-                        _selectedCourse = newValue;
-                      });
-                      // Trigger re-validation if needed
-                      _formKey.currentState?.validate();
-                    }
-                  },
-                  // Validation applies only if a department is selected
-                  validator: (value) => _selectedDepartment != null && value == null ? 'Please select your course' : null,
-                  isExpanded: true,
-                ),
-                const SizedBox(height: 30),
+                  const SizedBox(height: 30),
+                ],
 
                 // Register Button
                 _isLoading
@@ -660,7 +663,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const Text('Registration Successful'),
             ],
           ),
-          content: const Text('A verification email has been sent.\nPlease check your inbox (and spam folder) and click the link to verify your account before logging in.'),
+          content: Text(_isAdmin
+              ? 'Admin account created successfully. You can now log in.'
+              : 'A verification email has been sent.\nPlease check your inbox (and spam folder) and click the link to verify your account before logging in.'),
           actions: <Widget>[
             TextButton(
               style: TextButton.styleFrom(foregroundColor: brandColor),
