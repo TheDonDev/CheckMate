@@ -1,21 +1,112 @@
-
-import 'package:checkmate/models/course.dart';
-import 'package:checkmate/models/department.dart';
-import 'package:checkmate/models/school.dart';
-import 'package:checkmate/services/admin_service.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:checkmate/services/admin_service.dart';
+import 'package:flutter/services.dart';
+
+// --- UpperCaseTextFormatter ---
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class ManageCoursesScreen extends StatefulWidget {
   const ManageCoursesScreen({super.key});
 
   @override
-  State<ManageCoursesScreen> createState() => _ManageCoursesScreenState();
+  _ManageCoursesScreenState createState() => _ManageCoursesScreenState();
 }
 
 class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
   final AdminService _adminService = AdminService();
+  final TextEditingController _courseNameController = TextEditingController();
   String? _selectedSchoolId;
   String? _selectedDepartmentId;
+
+  void _addCourse() {
+    if (_courseNameController.text.isNotEmpty && _selectedDepartmentId != null) {
+      _adminService.addCourse(_courseNameController.text.trim().toUpperCase(), _selectedDepartmentId!).then((_) {
+        _courseNameController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Course added successfully')),
+        );
+      }).catchError((error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add course: $error')),
+        );
+      });
+    }
+  }
+
+  void _showEditDialog(DocumentSnapshot document) {
+    final TextEditingController editController =
+        TextEditingController(text: document['name']);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Course'),
+          content: TextField(
+            controller: editController,
+            decoration: const InputDecoration(labelText: 'Course Name'),
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [UpperCaseTextFormatter()],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Save'),
+              onPressed: () {
+                if (editController.text.isNotEmpty) {
+                  _adminService
+                      .updateCourse(document.id, editController.text.trim().toUpperCase())
+                      .then((_) {
+                    Navigator.of(context).pop();
+                  });
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteDialog(String id) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirm Delete'),
+          content: const Text('Are you sure you want to delete this course?'),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Delete'),
+              onPressed: () {
+                if (_selectedDepartmentId != null) {
+                  _adminService.deleteCourse(id)
+                      .then((_) {
+                    Navigator.of(context).pop();
+                  });
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,145 +116,126 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
       ),
       body: Column(
         children: [
-          StreamBuilder<List<School>>(
-            stream: _adminService.getSchools(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const CircularProgressIndicator();
-              final schools = snapshot.data!;
-              return DropdownButtonFormField<String>(
-                value: _selectedSchoolId,
-                hint: const Text('Select a School'),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedSchoolId = value;
-                    _selectedDepartmentId = null;
-                  });
-                },
-                items: schools.map((school) {
-                  return DropdownMenuItem<String>(
-                    value: school.id,
-                    child: Text(school.name),
-                  );
-                }).toList(),
-              );
-            },
-          ),
-          if (_selectedSchoolId != null)
-            StreamBuilder<List<Department>>(
-              stream: _adminService.getDepartments(_selectedSchoolId!),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _adminService.getSchools(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const CircularProgressIndicator();
-                final departments = snapshot.data!;
+                if (!snapshot.hasData) {
+                  return const CircularProgressIndicator();
+                }
+                var schools = snapshot.data!.docs;
                 return DropdownButtonFormField<String>(
-                  value: _selectedDepartmentId,
-                  hint: const Text('Select a Department'),
-                  onChanged: (value) {
+                  hint: const Text('Select School'),
+                  value: _selectedSchoolId,
+                  onChanged: (String? newValue) {
                     setState(() {
-                      _selectedDepartmentId = value;
+                      _selectedSchoolId = newValue;
+                      _selectedDepartmentId = null;
                     });
                   },
-                  items: departments.map((department) {
+                  items: schools.map((school) {
                     return DropdownMenuItem<String>(
-                      value: department.id,
-                      child: Text(department.name),
+                      value: school.id,
+                      child: Text(school['name'], overflow: TextOverflow.ellipsis),
                     );
                   }).toList(),
+                  isExpanded: true,
                 );
               },
             ),
-          Expanded(
-            child: _selectedDepartmentId == null
-                ? const Center(child: Text('Please select a school and department.'))
-                : StreamBuilder<List<Course>>(
-                    stream: _adminService.getCourses(_selectedDepartmentId!),
-                    builder: (context, snapshot) {
-                      if (snapshot.hasError) {
-                        return Center(child: Text('Error: ${snapshot.error}'));
-                      }
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final courses = snapshot.data ?? [];
-                      return ListView.builder(
-                        itemCount: courses.length,
-                        itemBuilder: (context, index) {
-                          final course = courses[index];
-                          return ListTile(
-                            title: Text(course.name),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.edit),
-                                  onPressed: () => _showCourseDialog(course: course),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete),
-                                  onPressed: () => _adminService.deleteCourse(course.id),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
           ),
+          if (_selectedSchoolId != null)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _adminService.getDepartments(_selectedSchoolId!),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const CircularProgressIndicator();
+                  }
+                  var departments = snapshot.data!.docs;
+                  return DropdownButtonFormField<String>(
+                    hint: const Text('Select Department'),
+                    value: _selectedDepartmentId,
+                    onChanged: (String? newValue) {
+                      setState(() {
+                        _selectedDepartmentId = newValue;
+                      });
+                    },
+                    items: departments.map((department) {
+                      return DropdownMenuItem<String>(
+                        value: department.id,
+                        child: Text(department['name'], overflow: TextOverflow.ellipsis),
+                      );
+                    }).toList(),
+                    isExpanded: true,
+                  );
+                },
+              ),
+            ),
+          if (_selectedDepartmentId != null)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _courseNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Course Name',
+                      ),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [UpperCaseTextFormatter()],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: _addCourse,
+                  ),
+                ],
+              ),
+            ),
+          if (_selectedDepartmentId != null)
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _adminService.getCourses(_selectedDepartmentId!),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const Text('Something went wrong');
+                  }
+
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const CircularProgressIndicator();
+                  }
+
+                  return ListView(
+                    children: snapshot.data!.docs.map((DocumentSnapshot document) {
+                      Map<String, dynamic> data = document.data()! as Map<String, dynamic>;
+                      return ListTile(
+                        title: Text(data['name']),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit),
+                              onPressed: () => _showEditDialog(document),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete),
+                              onPressed: () =>
+                                  _confirmDeleteDialog(document.id),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
+            ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCourseDialog(),
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  void _showCourseDialog({Course? course}) {
-    final nameController = TextEditingController(text: course?.name);
-    String? dialogSelectedDepartmentId = course?.departmentId ?? _selectedDepartmentId;
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(course == null ? 'Add Course' : 'Edit Course'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // This would need to be a more complex stateful dialog to handle school/department selection
-              // For simplicity, we assume a department is selected if we are adding a new course.
-              if (dialogSelectedDepartmentId != null)
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'Course Name'),
-                )
-              else
-                const Text('Please select a department first.'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            if (dialogSelectedDepartmentId != null)
-              TextButton(
-                onPressed: () {
-                  final name = nameController.text.trim();
-                  if (name.isNotEmpty) {
-                    if (course == null) {
-                      _adminService.addCourse(name, dialogSelectedDepartmentId!);
-                    } else {
-                      _adminService.updateCourse(course.id, name, dialogSelectedDepartmentId!);
-                    }
-                    Navigator.pop(context);
-                  }
-                },
-                child: const Text('Save'),
-              ),
-          ],
-        );
-      },
     );
   }
 }

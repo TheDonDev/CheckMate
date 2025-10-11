@@ -49,7 +49,7 @@ String? _toIso8601UtcString(DateTime? dateTime) {
 // Helper to convert a DateTime (assumed UTC) to 'YYYY-MM-DD' string
 String? _toDateOnlyIsoString(DateTime? dateTime) {
   if (dateTime == null) return null;
-  return DateFormat('yyyy-MM-dd').format(dateTime.toUtc());
+  return DateFormat('yyyy-MM-dd').format(dateTime); // Use the local date parts, don't convert to UTC here.
 }
 // --- End Helper Functions ---
 

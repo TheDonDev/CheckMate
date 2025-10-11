@@ -3,47 +3,68 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Function to check if the user is an admin
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isAuth() && request.auth.uid == userId;
+    }
+
     function isAdmin() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      // Check if the user is authenticated and their role is 'admin' in the users collection.
+      // It's important to check for the existence of the document and the role field.
+      return isAuth() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
     // Rules for the 'users' collection
     match /users/{userId} {
-      // Admins can read and write all user documents
-      allow read, write: if isAdmin();
-      // Users can read and write their own document
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow get: if isUser(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAuth(); // Allow any authenticated user to create their profile.
+      allow update: if isUser(userId) || isAdmin();
+      allow delete: if isAdmin();
     }
 
-    // Rules for other collections, accessible only by admin
+    // Rules for public data collections (e.g., for dropdowns)
+    // Allow anyone to read, but only admins to write.
     match /schools/{schoolId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
 
     match /venues/{venueId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
-
     match /departments/{departmentId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
-
     match /courses/{courseId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
-
     match /years_of_study/{yearId} {
-      allow read, write: if isAdmin();
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    match /semesters/{semesterId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
 
-    match /semesters/{semesterId} {
-      allow read, write: if isAdmin();
-    }
-    
-    //Lectures collection rules
+    // Lectures can be read/written by any authenticated user.
     match /lectures/{lectureId} {
-        allow read, write: if request.auth != null;
+      allow read, write: if isAuth();
+    }
+
+    // Rules for attendance records
+    match /attendance/{attendanceId} {
+      allow read, write: if isAuth();
     }
   }
 }

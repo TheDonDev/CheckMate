@@ -123,11 +123,10 @@ class Lecture {
       semester: data['semester'] ?? '',
       unitName: data['unitName'] ?? '',
       unitCode: data['unitCode'] ?? '',
-      // Convert Timestamps back to DateTime for the model fields
-      lectureDate: timestampToDateTime(data['lectureDate'] as Timestamp?),
-      // Ensure startTime/endTime are Timestamps, provide default if null/wrong type
-      startTime: data['startTime'] as Timestamp? ?? Timestamp.fromDate(DateTime(1970)),
-      endTime: data['endTime'] as Timestamp? ?? Timestamp.fromDate(DateTime(1970)),
+      // Correctly handle Timestamps from Firestore
+      lectureDate: (data['lectureDate'] as Timestamp?)?.toDate() ?? DateTime(1970),
+      startTime: data['startTime'] as Timestamp? ?? Timestamp.now(),
+      endTime: data['endTime'] as Timestamp? ?? Timestamp.now(),
       venue: data['venue'] ?? '',
       // Convert Timestamps back to DateTime for the model fields
       createdAt: timestampToDateTime(data['createdAt'] as Timestamp?),

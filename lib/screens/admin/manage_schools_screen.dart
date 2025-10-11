@@ -1,17 +1,104 @@
-
-import 'package:checkmate/models/school.dart';
-import 'package:checkmate/services/admin_service.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:checkmate/services/admin_service.dart';
+import 'package:flutter/services.dart';
+
+// --- UpperCaseTextFormatter ---
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class ManageSchoolsScreen extends StatefulWidget {
   const ManageSchoolsScreen({super.key});
 
   @override
-  State<ManageSchoolsScreen> createState() => _ManageSchoolsScreenState();
+  _ManageSchoolsScreenState createState() => _ManageSchoolsScreenState();
 }
 
 class _ManageSchoolsScreenState extends State<ManageSchoolsScreen> {
   final AdminService _adminService = AdminService();
+  final TextEditingController _schoolNameController = TextEditingController();
+
+  void _addSchool() {
+    if (_schoolNameController.text.isNotEmpty) {
+      _adminService.addSchool(_schoolNameController.text.trim().toUpperCase()).then((_) {
+        _schoolNameController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('School added successfully')),
+        );
+      }).catchError((error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add school: $error')),
+        );
+      });
+    }
+  }
+
+  void _showEditDialog(DocumentSnapshot document) {
+    final TextEditingController editController = TextEditingController(text: document['name']);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit School'),
+          content: TextField(
+            controller: editController,
+            decoration: const InputDecoration(labelText: 'School Name'),
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [UpperCaseTextFormatter()],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Save'),
+              onPressed: () {
+                if (editController.text.isNotEmpty) {
+                  _adminService.updateSchool(document.id, editController.text.trim().toUpperCase()).then((_) {
+                    Navigator.of(context).pop();
+                  });
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteDialog(String id) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirm Delete'),
+          content: const Text('Are you sure you want to delete this school?'),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Delete'),
+              onPressed: () {
+                _adminService.deleteSchool(id).then((_) {
+                  Navigator.of(context).pop();
+                });
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,80 +106,67 @@ class _ManageSchoolsScreenState extends State<ManageSchoolsScreen> {
       appBar: AppBar(
         title: const Text('Manage Schools'),
       ),
-      body: StreamBuilder<List<School>>(
-        stream: _adminService.getSchools(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final schools = snapshot.data ?? [];
-          return ListView.builder(
-            itemCount: schools.length,
-            itemBuilder: (context, index) {
-              final school = schools[index];
-              return ListTile(
-                title: Text(school.name),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _showSchoolDialog(school: school),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _schoolNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'School Name',
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _adminService.deleteSchool(school.id),
-                    ),
-                  ],
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [UpperCaseTextFormatter()],
+                  ),
                 ),
-              );
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showSchoolDialog(),
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  void _showSchoolDialog({School? school}) {
-    final nameController = TextEditingController(text: school?.name);
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(school == null ? 'Add School' : 'Edit School'),
-          content: TextField(
-            controller: nameController,
-            decoration: const InputDecoration(labelText: 'School Name'),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _addSchool,
+                ),
+              ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isNotEmpty) {
-                  if (school == null) {
-                    _adminService.addSchool(name);
-                  } else {
-                    _adminService.updateSchool(school.id, name);
-                  }
-                  Navigator.pop(context);
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _adminService.getSchools(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Text('Something went wrong');
                 }
+
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const CircularProgressIndicator();
+                }
+
+                return ListView(
+                  children: snapshot.data!.docs.map((DocumentSnapshot document) {
+                    Map<String, dynamic> data = document.data()! as Map<String, dynamic>;
+                    return ListTile(
+                      title: Text(data['name']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _showEditDialog(document),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete),
+                            onPressed: () => _confirmDeleteDialog(document.id),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                );
               },
-              child: const Text('Save'),
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 }

@@ -4,10 +4,10 @@ import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/screens/admin/manage_courses_screen.dart';
 import 'package:checkmate/screens/admin/manage_departments_screen.dart';
 import 'package:checkmate/screens/admin/manage_schools_screen.dart';
-import 'package:checkmate/screens/admin/manage_semester_screen.dart';
+import 'package:checkmate/screens/admin/manage_semesters_screen.dart';
 import 'package:checkmate/screens/admin/manage_users_screen.dart';
 import 'package:checkmate/screens/admin/manage_venues_screen.dart';
-import 'package:checkmate/screens/admin/manage_year_of_study_screen.dart';
+import 'package:checkmate/screens/admin/manage_years_screen.dart';
 import 'package:checkmate/screens/login_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:flutter/material.dart';
@@ -59,7 +59,7 @@ class AdminDashboard extends StatelessWidget {
             Navigator.push(context, MaterialPageRoute(builder: (context) => const ManageUsersScreen()));
           }),
           _buildDashboardCard(context, 'Manage Years of Study', Icons.calendar_today, () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const ManageYearsOfStudyScreen()));
+            Navigator.push(context, MaterialPageRoute(builder: (context) => const ManageYearsScreen()));
           }),
           _buildDashboardCard(context, 'Manage Semesters', Icons.calendar_view_day, () {
             Navigator.push(context, MaterialPageRoute(builder: (context) => const ManageSemestersScreen()));

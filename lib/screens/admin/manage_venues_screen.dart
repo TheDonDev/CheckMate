@@ -1,17 +1,104 @@
-
-import 'package:checkmate/models/venue.dart';
-import 'package:checkmate/services/admin_service.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:checkmate/services/admin_service.dart';
+import 'package:flutter/services.dart';
+
+// --- UpperCaseTextFormatter ---
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class ManageVenuesScreen extends StatefulWidget {
   const ManageVenuesScreen({super.key});
 
   @override
-  State<ManageVenuesScreen> createState() => _ManageVenuesScreenState();
+  _ManageVenuesScreenState createState() => _ManageVenuesScreenState();
 }
 
 class _ManageVenuesScreenState extends State<ManageVenuesScreen> {
   final AdminService _adminService = AdminService();
+  final TextEditingController _venueNameController = TextEditingController();
+
+  void _addVenue() {
+    if (_venueNameController.text.isNotEmpty) {
+      _adminService.addVenue(_venueNameController.text.toUpperCase()).then((_) {
+        _venueNameController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Venue added successfully')),
+        );
+      }).catchError((error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add venue: $error')),
+        );
+      });
+    }
+  }
+
+  void _showEditDialog(DocumentSnapshot document) {
+    final TextEditingController editController = TextEditingController(text: document['name']);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Venue'),
+          content: TextField(
+            controller: editController,
+            decoration: const InputDecoration(labelText: 'Venue Name'),
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [UpperCaseTextFormatter()],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Save'),
+              onPressed: () {
+                if (editController.text.isNotEmpty) {
+                  _adminService.updateVenue(document.id, editController.text.toUpperCase()).then((_) {
+                    Navigator.of(context).pop();
+                  });
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteDialog(String id) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirm Delete'),
+          content: const Text('Are you sure you want to delete this venue?'),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            TextButton(
+              child: const Text('Delete'),
+              onPressed: () {
+                _adminService.deleteVenue(id).then((_) {
+                  Navigator.of(context).pop();
+                });
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,80 +106,67 @@ class _ManageVenuesScreenState extends State<ManageVenuesScreen> {
       appBar: AppBar(
         title: const Text('Manage Venues'),
       ),
-      body: StreamBuilder<List<Venue>>(
-        stream: _adminService.getVenues(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final venues = snapshot.data ?? [];
-          return ListView.builder(
-            itemCount: venues.length,
-            itemBuilder: (context, index) {
-              final venue = venues[index];
-              return ListTile(
-                title: Text(venue.name),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _showVenueDialog(venue: venue),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _venueNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Venue Name',
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _adminService.deleteVenue(venue.id),
-                    ),
-                  ],
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [UpperCaseTextFormatter()],
+                  ),
                 ),
-              );
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showVenueDialog(),
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  void _showVenueDialog({Venue? venue}) {
-    final nameController = TextEditingController(text: venue?.name);
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(venue == null ? 'Add Venue' : 'Edit Venue'),
-          content: TextField(
-            controller: nameController,
-            decoration: const InputDecoration(labelText: 'Venue Name'),
+                IconButton(
+                  icon: const Icon(Icons.add),
+                  onPressed: _addVenue,
+                ),
+              ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isNotEmpty) {
-                  if (venue == null) {
-                    _adminService.addVenue(name);
-                  } else {
-                    _adminService.updateVenue(venue.id, name);
-                  }
-                  Navigator.pop(context);
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _adminService.getVenues(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Text('Something went wrong');
                 }
+
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const CircularProgressIndicator();
+                }
+
+                return ListView(
+                  children: snapshot.data!.docs.map((DocumentSnapshot document) {
+                    Map<String, dynamic> data = document.data()! as Map<String, dynamic>;
+                    return ListTile(
+                      title: Text(data['name']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _showEditDialog(document),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete),
+                            onPressed: () => _confirmDeleteDialog(document.id),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                );
               },
-              child: const Text('Save'),
             ),
-          ],
-        );
-      },
+          ),
+        ],
+      ),
     );
   }
 }

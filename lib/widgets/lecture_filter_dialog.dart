@@ -1,21 +1,21 @@
-// lib/widgets/lecture_filter_dialog.dart
-import 'package:checkmate/constants/dropdown_data.dart';
+import 'package:checkmate/services/admin_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 // Data class to hold filter values returned by the dialog
 class LectureFilterData {
-  final String? school;
-  final String? department;
-  final String? course;
-  final String? year;
-  final String? semester;
+  final String? schoolId;
+  final String? departmentId;
+  final String? courseId;
+  final String? yearId;
+  final String? semesterId;
 
   LectureFilterData({
-    this.school,
-    this.department,
-    this.course,
-    this.year,
-    this.semester,
+    this.schoolId,
+    this.departmentId,
+    this.courseId,
+    this.yearId,
+    this.semesterId,
   });
 }
 
@@ -44,43 +44,22 @@ class LectureFilterDialog extends StatefulWidget {
 
 class _LectureFilterDialogState extends State<LectureFilterDialog> {
   final _formKey = GlobalKey<FormState>();
+  final AdminService _adminService = AdminService();
 
-  String? _selectedSchool;
-  String? _selectedDepartment;
-  String? _selectedCourse;
-  String? _selectedYear;
-  String? _selectedSemester;
-
-  List<String> _currentDepartments = [];
-  List<String> _currentCourses = [];
+  String? _selectedSchoolId;
+  String? _selectedDepartmentId;
+  String? _selectedCourseId;
+  String? _selectedYearId;
+  String? _selectedSemesterId;
 
   @override
   void initState() {
     super.initState();
-    _selectedSchool = widget.fixedSchool ?? widget.initialFilters.school;
-    _selectedDepartment = widget.fixedDepartment ?? widget.initialFilters.department;
-    _selectedCourse = widget.fixedCourse ?? widget.initialFilters.course;
-    _selectedYear = widget.initialFilters.year;
-    _selectedSemester = widget.initialFilters.semester;
-    _updateDependentDropdowns();
-  }
-
-  void _updateDependentDropdowns() {
-    if (widget.fixedSchool == null) {
-      _currentDepartments = (_selectedSchool != null && departmentsMap.containsKey(_selectedSchool))
-          ? departmentsMap[_selectedSchool]! : [];
-      _currentCourses = (_selectedSchool != null && coursesMap.containsKey(_selectedSchool))
-          ? coursesMap[_selectedSchool]! : [];
-      if (_selectedDepartment != null && !_currentDepartments.contains(_selectedDepartment)) {
-        _selectedDepartment = null;
-      }
-      if (_selectedCourse != null && !_currentCourses.contains(_selectedCourse)) {
-        _selectedCourse = null;
-      }
-    } else {
-      _currentDepartments = departmentsMap[widget.fixedSchool] ?? [];
-      _currentCourses = coursesMap[widget.fixedSchool] ?? [];
-    }
+    _selectedSchoolId = widget.fixedSchool ?? widget.initialFilters.schoolId;
+    _selectedDepartmentId = widget.fixedDepartment ?? widget.initialFilters.departmentId;
+    _selectedCourseId = widget.fixedCourse ?? widget.initialFilters.courseId;
+    _selectedYearId = widget.initialFilters.yearId;
+    _selectedSemesterId = widget.initialFilters.semesterId;
   }
 
   void _applyFilters() {
@@ -97,11 +76,11 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
       }
     }
     final filters = LectureFilterData(
-      school: widget.fixedSchool ?? _selectedSchool,
-      department: widget.fixedDepartment ?? _selectedDepartment,
-      course: widget.fixedCourse ?? _selectedCourse,
-      year: _selectedYear,
-      semester: _selectedSemester,
+      schoolId: widget.fixedSchool ?? _selectedSchoolId,
+      departmentId: widget.fixedDepartment ?? _selectedDepartmentId,
+      courseId: widget.fixedCourse ?? _selectedCourseId,
+      yearId: _selectedYearId,
+      semesterId: _selectedSemesterId,
     );
     Navigator.of(context).pop(filters);
   }
@@ -135,8 +114,8 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
   @override
   Widget build(BuildContext context) {
     final bool allowSchoolChange = !widget.isInitialSelection && widget.fixedSchool == null;
-    final bool allowDeptChange = !widget.isInitialSelection && widget.fixedDepartment == null && _selectedSchool != null;
-    final bool allowCourseChange = !widget.isInitialSelection && widget.fixedCourse == null && _selectedSchool != null;
+    final bool allowDeptChange = !widget.isInitialSelection && widget.fixedDepartment == null && _selectedSchoolId != null;
+    final bool allowCourseChange = !widget.isInitialSelection && widget.fixedCourse == null && _selectedSchoolId != null;
 
     return AlertDialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), // Rounded corners
@@ -154,20 +133,26 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
                 if (widget.fixedSchool != null) ...[
                   _buildDisabledInfoField('School', widget.fixedSchool!),
                   const SizedBox(height: 15),
-                ] else DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('School', prefixIcon: const Icon(Icons.school_outlined)),
-                  value: _selectedSchool,
-                  items: [
-                    if (allowSchoolChange) const DropdownMenuItem<String>(value: null, child: Text('Any School')),
-                    ...schoolsList.map((String school) => DropdownMenuItem<String>(value: school, child: Text(school, overflow: TextOverflow.ellipsis))),
-                  ],
-                  onChanged: allowSchoolChange ? (String? newValue) {
-                    setState(() {
-                      _selectedSchool = newValue; _selectedDepartment = null; _selectedCourse = null;
-                      _updateDependentDropdowns();
-                    });
-                  } : null,
-                  isExpanded: true,
+                ] else StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getSchools(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const CircularProgressIndicator();
+                    var schools = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('School', prefixIcon: const Icon(Icons.school_outlined)),
+                      value: _selectedSchoolId,
+                      items: [
+                        if (allowSchoolChange) const DropdownMenuItem<String>(value: null, child: Text('Any School')),
+                        ...schools.map((school) => DropdownMenuItem<String>(value: school.id, child: Text(school['name'].toUpperCase(), overflow: TextOverflow.ellipsis))),
+                      ],
+                      onChanged: allowSchoolChange ? (String? newValue) {
+                        setState(() {
+                          _selectedSchoolId = newValue; _selectedDepartmentId = null; _selectedCourseId = null;
+                        });
+                      } : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
 
                 if (!allowSchoolChange && widget.fixedSchool != null) const SizedBox.shrink() else const SizedBox(height: 15),
@@ -175,17 +160,32 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
                 if (widget.fixedDepartment != null) ...[
                   _buildDisabledInfoField('Department', widget.fixedDepartment!),
                   const SizedBox(height: 15),
-                ] else DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Department', hint: _selectedSchool == null ? 'Select school first' : null, prefixIcon: const Icon(Icons.business_outlined)),
-                  value: _selectedDepartment,
-                  items: [
-                    if (allowDeptChange) const DropdownMenuItem<String>(value: null, child: Text('Any Department')),
-                    ..._currentDepartments.map((String department) => DropdownMenuItem<String>(value: department, child: Text(department, overflow: TextOverflow.ellipsis))),
-                  ],
-                  onChanged: allowDeptChange ? (String? newValue) {
-                    setState(() { _selectedDepartment = newValue; });
-                  } : null,
-                  isExpanded: true,
+                ] else StreamBuilder<QuerySnapshot>(
+                  stream: _selectedSchoolId == null ? null : _adminService.getDepartments(_selectedSchoolId!),
+                  builder: (context, snapshot) {
+                    if (_selectedSchoolId == null) {
+                      return DropdownButtonFormField<String>(
+                        decoration: _inputDecoration('Department', hint: 'Select school first', prefixIcon: const Icon(Icons.business_outlined)),
+                        items: const [],
+                        onChanged: null,
+                        isExpanded: true,
+                      );
+                    }
+                    if (!snapshot.hasData) return const CircularProgressIndicator();
+                    var departments = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('Department', hint: 'Select your department', prefixIcon: const Icon(Icons.business_outlined)),
+                      value: _selectedDepartmentId,
+                      items: [
+                        if (allowDeptChange) const DropdownMenuItem<String>(value: null, child: Text('Any Department')),
+                        ...departments.map((department) => DropdownMenuItem<String>(value: department.id, child: Text(department['name'].toUpperCase(), overflow: TextOverflow.ellipsis))),
+                      ],
+                      onChanged: allowDeptChange ? (String? newValue) {
+                        setState(() { _selectedDepartmentId = newValue; });
+                      } : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
 
                 if (!allowDeptChange && widget.fixedDepartment != null) const SizedBox.shrink() else const SizedBox(height: 15),
@@ -193,59 +193,88 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
                 if (widget.fixedCourse != null) ...[
                   _buildDisabledInfoField('Course', widget.fixedCourse!),
                   const SizedBox(height: 15),
-                ] else DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Course', hint: _selectedSchool == null ? 'Select school first' : null, prefixIcon: const Icon(Icons.book_outlined)),
-                  value: _selectedCourse,
-                  items: [
-                    if (allowCourseChange) const DropdownMenuItem<String>(value: null, child: Text('Any Course')),
-                    ..._currentCourses.map((String course) => DropdownMenuItem<String>(value: course, child: Text(course, overflow: TextOverflow.ellipsis))),
-                  ],
-                  onChanged: allowCourseChange ? (String? newValue) {
-                    setState(() { _selectedCourse = newValue; });
-                  } : null,
-                  isExpanded: true,
+                ] else StreamBuilder<QuerySnapshot>(
+                  stream: _selectedDepartmentId == null ? null : _adminService.getCourses(_selectedDepartmentId!),
+                  builder: (context, snapshot) {
+                    if (_selectedDepartmentId == null) {
+                      return DropdownButtonFormField<String>(
+                        decoration: _inputDecoration('Course', hint: 'Select department first', prefixIcon: const Icon(Icons.book_outlined)),
+                        items: const [],
+                        onChanged: null,
+                        isExpanded: true,
+                      );
+                    }
+                    if (!snapshot.hasData) return const CircularProgressIndicator();
+                    var courses = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('Course', hint: 'Select your course', prefixIcon: const Icon(Icons.book_outlined)),
+                      value: _selectedCourseId,
+                      items: [
+                        if (allowCourseChange) const DropdownMenuItem<String>(value: null, child: Text('Any Course')),
+                        ...courses.map((course) => DropdownMenuItem<String>(value: course.id, child: Text(course['name'].toUpperCase(), overflow: TextOverflow.ellipsis))),
+                      ],
+                      onChanged: allowCourseChange ? (String? newValue) {
+                        setState(() { _selectedCourseId = newValue; });
+                      } : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
                 const SizedBox(height: 15),
               ],
               // --- End Conditional Fields ---
 
               // --- Year Dropdown (Always Visible) ---
-              DropdownButtonFormField<String>(
-                decoration: _inputDecoration(
-                  'Year of Study',
-                  prefixIcon: const Icon(Icons.calendar_view_day_outlined, size: 20),
-                  isRequired: widget.isInitialSelection, // Mark as required visually
-                ),
-                value: _selectedYear,
-                items: [
-                  if (!widget.isInitialSelection) const DropdownMenuItem<String>(value: null, child: Text('Any Year')),
-                  ...yearsList.map((String year) => DropdownMenuItem<String>(value: year, child: Text(year))),
-                ],
-                onChanged: (String? newValue) { setState(() { _selectedYear = newValue; }); },
-                validator: widget.isInitialSelection
-                    ? (value) => value == null ? 'Please select year' : null
-                    : null,
-                isExpanded: true,
+              StreamBuilder<QuerySnapshot>(
+                stream: _adminService.getYearsOfStudy(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const CircularProgressIndicator();
+                  var years = snapshot.data!.docs;
+                  return DropdownButtonFormField<String>(
+                    decoration: _inputDecoration(
+                      'Year of Study',
+                      prefixIcon: const Icon(Icons.calendar_view_day_outlined, size: 20),
+                      isRequired: widget.isInitialSelection, // Mark as required visually
+                    ),
+                    value: _selectedYearId,
+                    items: [
+                      if (!widget.isInitialSelection) const DropdownMenuItem<String>(value: null, child: Text('Any Year')),
+                      ...years.map((year) => DropdownMenuItem<String>(value: year.id, child: Text(year['name'].toUpperCase()))),
+                    ],
+                    onChanged: (String? newValue) { setState(() { _selectedYearId = newValue; }); },
+                    validator: widget.isInitialSelection
+                        ? (value) => value == null ? 'Please select year' : null
+                        : null,
+                    isExpanded: true,
+                  );
+                },
               ),
               const SizedBox(height: 15),
 
               // --- Semester Dropdown (Always Visible) ---
-              DropdownButtonFormField<String>(
-                decoration: _inputDecoration(
-                  'Semester',
-                  prefixIcon: const Icon(Icons.filter_list_alt, size: 20),
-                  isRequired: widget.isInitialSelection, // Mark as required visually
-                ),
-                value: _selectedSemester,
-                items: [
-                  if (!widget.isInitialSelection) const DropdownMenuItem<String>(value: null, child: Text('Any Semester')),
-                  ...semestersList.map((String semester) => DropdownMenuItem<String>(value: semester, child: Text(semester))),
-                ],
-                onChanged: (String? newValue) { setState(() { _selectedSemester = newValue; }); },
-                validator: widget.isInitialSelection
-                    ? (value) => value == null ? 'Please select semester' : null
-                    : null,
-                isExpanded: true,
+              StreamBuilder<QuerySnapshot>(
+                stream: _adminService.getSemesters(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const CircularProgressIndicator();
+                  var semesters = snapshot.data!.docs;
+                  return DropdownButtonFormField<String>(
+                    decoration: _inputDecoration(
+                      'Semester',
+                      prefixIcon: const Icon(Icons.filter_list_alt, size: 20),
+                      isRequired: widget.isInitialSelection, // Mark as required visually
+                    ),
+                    value: _selectedSemesterId,
+                    items: [
+                      if (!widget.isInitialSelection) const DropdownMenuItem<String>(value: null, child: Text('Any Semester')),
+                      ...semesters.map((semester) => DropdownMenuItem<String>(value: semester.id, child: Text(semester['name'].toUpperCase()))),
+                    ],
+                    onChanged: (String? newValue) { setState(() { _selectedSemesterId = newValue; }); },
+                    validator: widget.isInitialSelection
+                        ? (value) => value == null ? 'Please select semester' : null
+                        : null,
+                    isExpanded: true,
+                  );
+                },
               ),
             ],
           ),

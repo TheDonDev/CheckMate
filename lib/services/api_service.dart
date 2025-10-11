@@ -20,7 +20,6 @@ class ApiException implements Exception {
 
 class ApiService {
   // --- Base URL Determination ----
-  static const String _localIp = '192.168.50.156'; // Your local IP
   static const String _androidEmulatorIp = '10.0.2.2';
   static const String _port = '5000';
   // static const String _firebaseFunctionsUrl = 'https://us-central1-checkmate-app-8489a.cloudfunctions.net/api'; // Example
@@ -30,33 +29,25 @@ class ApiService {
   static const Duration _defaultTimeout = Duration(seconds: 25); // Increased timeout
 
   ApiService() {
-    const bool useFirebaseFunctions = false;
     const String localApiPath = '/api/firebase';
-    const String functionsApiPath = '/api';
 
-    if (useFirebaseFunctions) {
-      // _baseUrl = _firebaseFunctionsUrl + functionsApiPath;
-       _baseUrl = 'https://us-central1-checkmate-app-8489a.cloudfunctions.net/api' + functionsApiPath; // Example
-      if (kDebugMode) print("ApiService using Firebase Functions URL: $_baseUrl");
+    if (kIsWeb) {
+      _baseUrl = 'http://localhost:$_port$localApiPath';
     } else {
-      if (kIsWeb) {
-        _baseUrl = 'http://localhost:$_port$localApiPath';
-      } else {
-        try {
-          if (Platform.isAndroid) {
-            _baseUrl = 'http://$_androidEmulatorIp:$_port$localApiPath';
-          } else if (Platform.isIOS) {
-            _baseUrl = 'http://localhost:$_port$localApiPath';
-          } else {
-            _baseUrl = 'http://localhost:$_port$localApiPath';
-          }
-        } catch (e) {
-          if (kDebugMode) print("Platform check failed, defaulting to localhost: $e");
+      try {
+        if (Platform.isAndroid) {
+          _baseUrl = 'http://$_androidEmulatorIp:$_port$localApiPath';
+        } else if (Platform.isIOS) {
+          _baseUrl = 'http://localhost:$_port$localApiPath';
+        } else {
           _baseUrl = 'http://localhost:$_port$localApiPath';
         }
+      } catch (e) {
+        if (kDebugMode) print("Platform check failed, defaulting to localhost: $e");
+        _baseUrl = 'http://localhost:$_port$localApiPath';
       }
-      if (kDebugMode) print("ApiService using Local/Self-Hosted URL: $_baseUrl");
     }
+    if (kDebugMode) print("ApiService using Local/Self-Hosted URL: $_baseUrl");
   }
   // --- End Base URL Determination ---
 

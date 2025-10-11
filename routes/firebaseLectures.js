@@ -185,17 +185,14 @@ router.post('/', checkAuth, async (req, res) => {
     console.log('[POST /lectures] Date/time parsing and validation passed.');
 
     console.log('[POST /lectures] Validating venue and online link...');
-    const formattedVenue = venue.trim();
     let finalOnlineLink = null;
 
-    if (formattedVenue.toUpperCase() === 'ONLINE') {
-        if (!onlineLink || onlineLink.trim().length === 0) {
-            console.error('[POST /lectures] Validation Error: Online link is required when venue is ONLINE.');
-            return res.status(400).json({ error: 'Online lecture link is required when venue is set to ONLINE.' });
-        }
+    // If an onlineLink is provided in the request body, validate it.
+    // The frontend logic ensures this is only sent when the venue is 'ONLINE'.
+    if (onlineLink && typeof onlineLink === 'string' && onlineLink.trim().length > 0) {
         try {
             const trimmedLink = onlineLink.trim();
-            new URL(trimmedLink);
+            new URL(trimmedLink); // This will throw an error if the URL is invalid
             finalOnlineLink = trimmedLink;
             console.log('[POST /lectures] Online link validated successfully.');
         } catch (_) {
@@ -203,7 +200,7 @@ router.post('/', checkAuth, async (req, res) => {
             return res.status(400).json({ error: 'Please provide a valid URL for the online lecture link (e.g., https://...).' });
         }
     } else {
-        console.log(`[POST /lectures] Venue is not ONLINE ('${formattedVenue}'), online link not required/used.`);
+        console.log(`[POST /lectures] No onlineLink provided in the request, or it was empty.`);
     }
     console.log('[POST /lectures] Venue and online link validation passed.');
     // --- End Validation ---
@@ -213,17 +210,17 @@ router.post('/', checkAuth, async (req, res) => {
       lecturerId: authUserId,
       lecturerName: userData.name || 'N/A', // Use fetched user data
       lecturerPhone: lecturerPhone?.trim() || userData.phoneNumber || null, // Prefer provided, fallback to profile
-      school: formatStringForQuery(school), // Use data from request body
-      department: formatStringForQuery(department), // Use data from request body
-      course: formatStringForQuery(course), // Use data from request body
-      yearOfStudy: formatStringForQuery(yearOfStudy),
-      semester: formatStringForQuery(semester),
+      school: school, // Use data from request body
+      department: department, // Use data from request body
+      course: course, // Use data from request body
+      yearOfStudy: yearOfStudy,
+      semester: semester,
       unitName: unitName.trim(),
       unitCode: unitCode.trim().toUpperCase(),
       lectureDate: parsedLectureDate, // Use parsed JS Date
       startTime: parsedStartTime,     // Use parsed JS Date
       endTime: parsedEndTime,         // Use parsed JS Date
-      venue: formattedVenue,
+      venue: venue.trim(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       onlineLink: finalOnlineLink,
     };
@@ -458,25 +455,27 @@ router.get('/student', checkAuth, async (req, res) => {
             return res.status(403).json({ error: 'Forbidden: You can only filter lectures for your registered school, department, and course.' });
         }
 
-        const queryYear = formatStringForQuery(requestedYear);
-        const querySemester = formatStringForQuery(requestedSemester);
+        const queryYear = requestedYear; // Use ID directly
+        const querySemester = requestedSemester; // Use ID directly
 
         console.log(`[GET /student] Firestore Query Parameters for student ${studentUserId}:`);
-        console.log(`  school: '${querySchool}', department: '${queryDepartment}', course: '${queryCourse}', yearOfStudy: '${queryYear}', semester: '${querySemester}'`);
+        console.log(`  school: '${requestedSchool}', department: '${requestedDepartment}', course: '${requestedCourse}', yearOfStudy: '${queryYear}', semester: '${querySemester}'`);
 
         const lecturesRef = db.collection(LECTURES_COLLECTION);
         let query = lecturesRef
-            .where('school', '==', querySchool)
-            .where('department', '==', queryDepartment)
-            .where('course', '==', queryCourse)
+            .where('school', '==', requestedSchool) // Query by ID
+            .where('department', '==', requestedDepartment) // Query by ID
+            .where('course', '==', requestedCourse) // Query by ID
             .where('yearOfStudy', '==', queryYear)
             .where('semester', '==', querySemester);
 
-        // Filter for upcoming lectures (startTime >= start of today)
+        // Filter for lectures from the start of today onwards.
+        // This correctly includes lectures happening today, regardless of server timezone.
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Set to midnight start of today
-        query = query.where('startTime', '>=', today);
-        console.log(`  startTime: >= ${today.toISOString()}`);
+        // Use 'lectureDate' for the query, as 'startTime' includes time and can be tricky with timezones.
+        query = query.where('lectureDate', '>=', today);
+        console.log(`  lectureDate: >= ${today.toISOString()}`);
 
         query = query.orderBy('startTime', 'asc'); // Order upcoming lectures chronologically
         console.log(`  orderBy: startTime asc`);
@@ -648,7 +647,7 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
         // --- VALIDATE AND PREPARE UPDATE DATA ---
         console.log(`[PUT /${lectureId}] Validating and preparing update fields...`);
         const allowedUpdates = {};
-        const editableFields = ['unitName', 'unitCode', 'venue', 'yearOfStudy', 'semester', 'lectureDate', 'startTime', 'endTime', 'onlineLink'];
+        const editableFields = ['unitName', 'unitCode', 'school', 'department', 'course', 'venue', 'yearOfStudy', 'semester', 'lectureDate', 'startTime', 'endTime', 'onlineLink'];
 
         for (const field of editableFields) {
             if (updateData.hasOwnProperty(field)) {
@@ -664,7 +663,7 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
                 else if (field === 'onlineLink') {
                     allowedUpdates[field] = updateData[field]?.trim() || null; // Trim or set to null
                 }
-                else if (['unitCode', 'yearOfStudy', 'semester'].includes(field)) {
+                else if (['unitCode'].includes(field)) {
                      allowedUpdates[field] = formatStringForQuery(updateData[field]); // Trim and uppercase
                 }
                 else if (typeof updateData[field] === 'string') {
@@ -677,27 +676,26 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
         }
 
         // Validate onlineLink based on FINAL venue (original or updated)
-        const finalVenue = allowedUpdates.hasOwnProperty('venue') ? allowedUpdates.venue : lectureData.venue;
         const finalOnlineLink = allowedUpdates.hasOwnProperty('onlineLink') ? allowedUpdates.onlineLink : lectureData.onlineLink;
 
-        if (finalVenue?.toUpperCase() === 'ONLINE') {
-            if (!finalOnlineLink || finalOnlineLink.trim().length === 0) {
-                console.error(`[PUT /${lectureId}] Validation Error: Online link required for ONLINE venue.`);
-                return res.status(400).json({ error: 'Online lecture link is required when venue is set to ONLINE.' });
+        // If an onlineLink is provided in the update payload, validate it.
+        // The frontend logic ensures this is only sent when the venue is 'ONLINE'.
+        if (allowedUpdates.hasOwnProperty('onlineLink')) {
+            if (allowedUpdates.onlineLink && typeof allowedUpdates.onlineLink === 'string' && allowedUpdates.onlineLink.trim().length > 0) {
+                try {
+                    const trimmedLink = allowedUpdates.onlineLink.trim();
+                    new URL(trimmedLink); // This will throw an error if the URL is invalid
+                    allowedUpdates.onlineLink = trimmedLink; // Ensure it's the trimmed version
+                    console.log(`[PUT /${lectureId}] Online link validated successfully.`);
+                } catch (_) {
+                    console.error(`[PUT /${lectureId}] Validation Error: Invalid URL format for online link: ${allowedUpdates.onlineLink}`);
+                    return res.status(400).json({ error: 'Please provide a valid URL for the online lecture link.' });
+                }
+            } else {
+                // If the link is sent as empty string or null, ensure it's saved as null.
+                allowedUpdates.onlineLink = null;
+                console.log(`[PUT /${lectureId}] onlineLink was provided but empty, setting to null.`);
             }
-            try { new URL(finalOnlineLink.trim()); } catch (_) {
-                console.error(`[PUT /${lectureId}] Validation Error: Invalid URL format for online link: ${finalOnlineLink}`);
-                return res.status(400).json({ error: 'Please provide a valid URL for the online lecture link.' });
-            }
-        }
-        // If venue is changed *away* from ONLINE, explicitly nullify the link in the update
-        if (finalVenue?.toUpperCase() !== 'ONLINE' && allowedUpdates.hasOwnProperty('venue')) {
-             console.log(`[PUT /${lectureId}] Venue changed to non-ONLINE, setting onlineLink to null.`);
-             allowedUpdates.onlineLink = null;
-        } else if (finalVenue?.toUpperCase() !== 'ONLINE' && allowedUpdates.hasOwnProperty('onlineLink')) {
-             // If venue wasn't changed but link was provided for non-ONLINE, nullify it
-             console.log(`[PUT /${lectureId}] Venue is not ONLINE, setting onlineLink to null.`);
-             allowedUpdates.onlineLink = null;
         }
 
 

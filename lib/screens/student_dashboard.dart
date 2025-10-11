@@ -4,8 +4,10 @@ import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/services/auth_service.dart';
+import 'package:checkmate/services/admin_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:checkmate/widgets/document_name_widget.dart';
 import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:checkmate/screens/qr_scanner_screen.dart';
@@ -34,6 +36,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
   String? fixedYearOfStudy;
   String? fixedSemester;
 
+  // Name cache
+  String? _yearOfStudyName;
+  String? _semesterName;
+
   // Attendance summary state
   bool _isLoadingSummary = true;
   String? _summaryError;
@@ -52,6 +58,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
     fixedCourse = widget.currentUser.course;
     fixedYearOfStudy = widget.currentUser.yearOfStudy;
     fixedSemester = widget.currentUser.semester;
+
+    _loadNames();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -135,7 +143,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   void loadLectures() {
     if (fixedSchool == null || fixedDepartment == null || fixedCourse == null || fixedYearOfStudy == null || fixedSemester == null) {
       if (kDebugMode) print("Cannot load lectures: Missing fixed user details.");
-      if (lecturesFuture != null && mounted) { setState(() { lecturesFuture = null; }); }
+      if (mounted) { setState(() { lecturesFuture = Future.value([]); }); } // Set to empty future
       return;
     }
     if (!mounted) return;
@@ -184,6 +192,26 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
+  Future<void> _loadNames() async {
+    final adminService = AdminService();
+    if (fixedYearOfStudy != null && fixedYearOfStudy!.isNotEmpty) {
+      try {
+        final name = await adminService.getDocumentName('years_of_study', fixedYearOfStudy!);
+        if (mounted) setState(() => _yearOfStudyName = name);
+      } catch (e) {
+        if (kDebugMode) print("Error loading year of study name: $e");
+      }
+    }
+    if (fixedSemester != null && fixedSemester!.isNotEmpty) {
+      try {
+        final name = await adminService.getDocumentName('semesters', fixedSemester!);
+        if (mounted) setState(() => _semesterName = name);
+      } catch (e) {
+        if (kDebugMode) print("Error loading semester name: $e");
+      }
+    }
+  }
+
   // --- Helpers ---
   Future<void> _launchURL(String urlString) async {
     final Uri url = Uri.parse(urlString.trim());
@@ -194,10 +222,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
       }
     } catch (e) {
       if (mounted) {
-        showSnackBar('Could not open link: $urlString', isError: true);
+        _showErrorDialog('Action Failed', 'Could not open the link: $urlString');
       }
       if (kDebugMode) print('Error launching URL $launchUri: $e');
     }
+  }
+
+  void _showErrorDialog(String title, String content) {
+    if (!mounted) return;
+    showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Row(children: [ Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error), const SizedBox(width: 10), Text(title), ]),
+            content: Text(content),
+            actions: <Widget>[ TextButton(child: const Text('OK'), onPressed: () => Navigator.of(dialogContext).pop()), ],
+          );
+        });
   }
 
   void showSnackBar(String message, {bool isError = false}) {
@@ -277,7 +319,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   Future<void> _handleStudentJoin(Lecture lecture) async {
     final studentRegNum = widget.currentUser.registrationNumber;
     if (studentRegNum == null || studentRegNum.isEmpty) {
-      showSnackBar('Error: Your registration number is missing. Cannot join lecture.', isError: true); return;
+      _showErrorDialog('Action Failed', 'Your registration number is missing. Cannot join lecture.'); return;
     }
     if (_processingLectureId != null) return;
 
@@ -289,7 +331,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
       await _loadAttendanceSummary();
       showSnackBar('Successfully joined ${lecture.unitName}!', isError: false);
 
-      if (lecture.venue.toUpperCase() == 'ONLINE' &&
+      if (lecture.venue.toLowerCase() == 'online' &&
           lecture.onlineLink != null &&
           lecture.onlineLink!.trim().isNotEmpty) {
         if (kDebugMode) print("Attempting to auto-launch online link after join: ${lecture.onlineLink}");
@@ -305,7 +347,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
          showSnackBar('You have already joined ${lecture.unitName}.', isError: false);
          await _loadAttendanceSummary();
       } else {
-         showSnackBar('Failed to join lecture: ${e is ApiException ? e.message : e.toString()}', isError: true);
+         _showErrorDialog('Join Failed', e is ApiException ? e.message : 'An unexpected error occurred. Please try again.');
       }
     } finally {
       if (mounted) { setState(() { _processingLectureId = null; }); }
@@ -315,7 +357,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   Future<void> showJoinLectureDialog(Lecture lecture) async {
      final studentRegNum = widget.currentUser.registrationNumber;
     if (studentRegNum == null || studentRegNum.isEmpty) {
-      showSnackBar('Error: Your registration number is missing. Cannot join lecture.', isError: true); return;
+      _showErrorDialog('Action Failed', 'Your registration number is missing. Cannot join lecture.'); return;
     }
     if (_processingLectureId != null) return;
 
@@ -347,8 +389,16 @@ class _StudentDashboardState extends State<StudentDashboard> {
               const SizedBox(height: 15),
               Text('Date: ${lecture.formattedDate}'),
               Text('Time: ${lecture.formattedStartTime} - ${lecture.formattedEndTime}'),
-              Text('Venue: ${lecture.venue}'),
-              if (lecture.venue.toUpperCase() == 'ONLINE' && lecture.onlineLink != null && lecture.onlineLink!.isNotEmpty) ...[
+              Row(
+                children: [
+                  const Text('Venue: '),
+                  DocumentNameWidget(
+                    collection: 'venues',
+                    documentId: lecture.venue,
+                  ),
+                ],
+              ),
+              if (lecture.venue.toLowerCase() == 'online' && lecture.onlineLink != null && lecture.onlineLink!.isNotEmpty) ...[
                  const SizedBox(height: 8),
                  SelectableText(
                     'Link: ${lecture.onlineLink}',
@@ -377,7 +427,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
   // Scan QR and Check In
   Future<void> _scanLectureQrAndCheckIn() async {
      if (widget.currentUser.registrationNumber == null || widget.currentUser.registrationNumber!.isEmpty) {
-       showSnackBar('Error: Your registration number is missing. Cannot check in via QR.', isError: true); return;
+       _showErrorDialog('Action Failed', 'Your registration number is missing. Cannot check in via QR.'); return;
     }
     if (_processingLectureId != null) return;
 
@@ -404,7 +454,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
         final lectureEndTime = scannedLecture.endTime;
         if (lectureEndTime != null && DateTime.now().isAfter(lectureEndTime)) {
             if (kDebugMode) print("Frontend Check: Lecture ${scannedLecture.unitName} has ended. Aborting check-in API call.");
-            showSnackBar('Cannot check in: Lecture "${scannedLecture.unitName}" has already ended.', isError: true);
+            _showErrorDialog('Check-in Failed', 'Cannot check in: Lecture "${scannedLecture.unitName}" has already ended.');
             return;
         } else {
              if (kDebugMode) print("Frontend Check: Lecture ${scannedLecture.unitName} end time (${lectureEndTime ?? 'null'}) is in the future or null. Proceeding.");
@@ -427,17 +477,17 @@ class _StudentDashboardState extends State<StudentDashboard> {
       if (!mounted) return;
       if (e is ApiException) {
           if (e.statusCode == 400 && e.message.toLowerCase().contains("lecture has already ended")) {
-              showSnackBar('Check-in failed: The lecture has already ended.', isError: true);
+              _showErrorDialog('Check-in Failed', 'The lecture has already ended.');
           } else if (e.statusCode == 400 || e.statusCode == 404) {
-              showSnackBar('Check-in failed: You must join the lecture first.', isError: true);
+              _showErrorDialog('Check-in Failed', 'You must join the lecture first before you can check in.');
           } else if (e.statusCode == 409) {
               showSnackBar('Check-in failed: You are already checked in.', isError: true);
               await _loadAttendanceSummary();
           } else {
-              showSnackBar('QR Check-in failed: ${e.message}', isError: true);
+              _showErrorDialog('QR Check-in Failed', e.message);
           }
       } else {
-          showSnackBar('QR Check-in failed: An unexpected error occurred.', isError: true);
+          _showErrorDialog('QR Check-in Failed', 'An unexpected error occurred. Please try again.');
       }
       if (kDebugMode) print("Error during checkInViaLectureQr API call: $e");
     } finally {
@@ -503,7 +553,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text( 'Attendance Summary ($fixedYearOfStudy - $fixedSemester)', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: brandColor), ),
+            Text( 'Attendance Summary (${_yearOfStudyName ?? fixedYearOfStudy} - ${_semesterName ?? fixedSemester})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold, color: brandColor), ),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -606,11 +656,29 @@ class _StudentDashboardState extends State<StudentDashboard> {
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
               child: Wrap(
                 spacing: 8.0, runSpacing: 4.0,
-                children: [
-                  if (fixedYearOfStudy != null) Chip(label: Text('Year: $fixedYearOfStudy'), backgroundColor: brandColor.withOpacity(0.1), side: BorderSide.none),
-                  if (fixedSemester != null) Chip(label: Text('Semester: $fixedSemester'), backgroundColor: brandColor.withOpacity(0.1), side: BorderSide.none),
-                  if (fixedCourse != null) Chip(label: Text('Course: $fixedCourse'), backgroundColor: Colors.grey.shade200, side: BorderSide.none),
-                ],
+                children: [                  
+                  Chip(
+                    label: DocumentNameWidget(
+                      collection: 'years_of_study',
+                      documentId: fixedYearOfStudy,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    backgroundColor: brandColor.withOpacity(0.1), side: BorderSide.none), // End children
+                  Chip(
+                    label: DocumentNameWidget(
+                      collection: 'semesters',
+                      documentId: fixedSemester,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    backgroundColor: brandColor.withOpacity(0.1), side: BorderSide.none),
+                  Chip(
+                    label: DocumentNameWidget(
+                      collection: 'courses',
+                      documentId: fixedCourse,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                    backgroundColor: Colors.grey.shade200, side: BorderSide.none),
+                ], // End children
               ),
             ),
             const Divider(height: 1, indent: 16, endIndent: 16, thickness: 0.5),
@@ -693,7 +761,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                       children: [
                                         Icon(Icons.event_busy_outlined, size: 50, color: Colors.grey.shade400),
                                         const SizedBox(height: 10),
-                                        Text( 'No lectures found for Year $fixedYearOfStudy, Semester $fixedSemester.\nPull down to refresh.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey.shade600), ),
+                                        Text( 'No lectures found for ${_yearOfStudyName ?? fixedYearOfStudy}, ${_semesterName ?? fixedSemester}.\nPull down to refresh.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey.shade600), ),
                                       ],
                                     )
                                   ),
@@ -730,12 +798,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
                               final bool isJoined = attendanceRecord != null && !attendanceRecord.checkedIn;
                               final bool isCheckedIn = attendanceRecord != null && attendanceRecord.checkedIn;
                               final bool isCurrentlyProcessing = _processingLectureId == lecture.id;
-                              final bool isOnlineWithLink = lecture.venue.toUpperCase() == 'ONLINE' && lecture.onlineLink != null && lecture.onlineLink!.trim().isNotEmpty;
 
                               final lectureEndTime = lecture.endTime;
                               final bool hasEnded = lectureEndTime != null && DateTime.now().isAfter(lectureEndTime);
-
-                              String subtitleText = 'Lecturer: ${lecture.lecturerName}\n${lecture.formattedDate} | ${lecture.formattedStartTime} - ${lecture.formattedEndTime}\nVenue: ${lecture.venue}';
 
                               return Card(
                                 margin: const EdgeInsets.symmetric(vertical: 6.0),
@@ -744,18 +809,23 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
                                   child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start, // Align to top
                                     children: [
-                                      CircleAvatar(
-                                        backgroundColor: brandColor.withOpacity(0.1),
-                                        child: Icon(
-                                          (hasEnded && !isCheckedIn) ? Icons.event_busy_outlined :
-                                          isCheckedIn ? Icons.check_circle_outline_rounded :
-                                          (isJoined ? Icons.hourglass_bottom_rounded :
-                                          (isOnlineWithLink ? Icons.videocam_outlined : Icons.schedule_outlined)),
-                                          color: (hasEnded && !isCheckedIn) ? Colors.grey.shade600 : brandColor,
-                                          size: 24,
-                                        ),
+                                      // Use a builder to dynamically set the icon based on venue name
+                                      DocumentNameWidget(
+                                        collection: 'venues', documentId: lecture.venue,
+                                        builder: (context, venueName) {
+                                          final bool isOnline = venueName?.toLowerCase() == 'online';
+                                          return CircleAvatar(
+                                            backgroundColor: brandColor.withOpacity(0.1),
+                                            child: Icon(
+                                              (hasEnded && !isCheckedIn) ? Icons.event_busy_outlined :
+                                              isCheckedIn ? Icons.check_circle_outline_rounded :
+                                              (isJoined ? Icons.hourglass_bottom_rounded : (isOnline ? Icons.videocam_outlined : Icons.schedule_outlined)),
+                                              color: (hasEnded && !isCheckedIn) ? Colors.grey.shade600 : brandColor, size: 24,
+                                            ),
+                                          );
+                                        },
                                       ),
                                       const SizedBox(width: 16),
                                       Expanded(
@@ -767,30 +837,51 @@ class _StudentDashboardState extends State<StudentDashboard> {
                                               style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)
                                             ),
                                             const SizedBox(height: 4),
-                                            Text(
-                                              subtitleText,
-                                              style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3),
-                                            ),
-                                            if (isOnlineWithLink && (isJoined || isCheckedIn || !hasEnded)) ...[
-                                              const SizedBox(height: 8),
-                                              TextButton.icon(
-                                                icon: Icon(Icons.open_in_browser_outlined, size: 18, color: brandColor),
-                                                label: Text('Open Online Link', style: TextStyle(fontSize: 13, color: brandColor, fontWeight: FontWeight.w500)),
-                                                style: TextButton.styleFrom(
-                                                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                  visualDensity: VisualDensity.compact,
-                                                  alignment: Alignment.centerLeft,
+                                            Text('Lecturer: ${lecture.lecturerName}', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                                            Text('${lecture.formattedDate} | ${lecture.formattedStartTime} - ${lecture.formattedEndTime}', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                                            Row(
+                                              children: [
+                                                Text('Venue: ', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                                                // Use DocumentNameWidget with a builder to show the link
+                                                DocumentNameWidget(
+                                                  collection: 'venues',
+                                                  documentId: lecture.venue,
+                                                  style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3),
+                                                  builder: (context, venueName) {
+                                                    final bool isOnline = venueName?.toUpperCase() == 'ONLINE';
+                                                    final bool hasLink = lecture.onlineLink != null && lecture.onlineLink!.trim().isNotEmpty;
+
+                                                    // If online with a link, show the link button
+                                                    if (isOnline && hasLink) {
+                                                      return Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Text(venueName ?? lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                                                          const SizedBox(height: 4),
+                                                          TextButton.icon(
+                                                            icon: Icon(Icons.open_in_browser_outlined, size: 18, color: brandColor),
+                                                            label: Text('Open Online Link', style: TextStyle(fontSize: 13, color: brandColor, fontWeight: FontWeight.w500)),
+                                                            style: TextButton.styleFrom(
+                                                              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                              tapTargetSize: MaterialTapTargetSize.shrinkWrap, visualDensity: VisualDensity.compact, alignment: Alignment.centerLeft,
+                                                            ),
+                                                            // Show link if not ended, or if already checked in
+                                                            onPressed: (_processingLectureId != null || (hasEnded && !isCheckedIn)) ? null : () => _launchURL(lecture.onlineLink!),
+                                                          ),
+                                                        ],
+                                                      );
+                                                    }
+                                                    // Otherwise, just show the venue name
+                                                    return Text(venueName ?? lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3));
+                                                  },
                                                 ),
-                                                onPressed: _processingLectureId != null ? null : () => _launchURL(lecture.onlineLink!),
-                                              ),
-                                            ]
+                                              ],
+                                            ),
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
-
-                                      // Trailing Widget Logic
+                                      const SizedBox(width: 16),
+                                      // --- Trailing Widget Logic (No longer in an Expanded) ---
                                       if (hasEnded && !isCheckedIn)
                                         Chip(
                                           avatar: Icon(Icons.event_busy, size: 18, color: Colors.grey.shade700),

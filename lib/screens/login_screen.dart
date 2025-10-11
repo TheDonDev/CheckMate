@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 // Import dashboards directly
 import 'package:checkmate/screens/student_dashboard.dart';
-import 'package:checkmate/screens/lecturer_dashboard.dart';
+import 'package:checkmate/screens/lecturer_dashboard.dart'; // This was missing
 import 'package:checkmate/screens/admin_dashboard.dart';
 import 'package:provider/provider.dart'; // Import Provider
 import 'package:url_launcher/url_launcher.dart'; // Import url_launcher
@@ -96,25 +96,25 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
-  // Helper function to show snackbar messages (no changes needed)
-  void _showSnackBar(String message, {bool isError = true}) {
+  // Helper function to show a user-friendly error dialog
+  void _showErrorDialog(String title, String content) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? Theme.of(context).colorScheme.error : Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(10),
-      ),
-    );
+    showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Row(children: [ Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error), const SizedBox(width: 10), Text(title), ]),
+            content: Text(content),
+            actions: <Widget>[ TextButton(child: const Text('OK'), onPressed: () => Navigator.of(dialogContext).pop()), ],
+          );
+        });
   }
-
 
   // --- Login Action --- 
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) {
-      _showSnackBar('Please fix the errors in the form.', isError: true);
+      _showErrorDialog('Validation Error', 'Please fix the errors in the form.');
       return;
     }
     final authService = Provider.of<AuthService>(context, listen: false);
@@ -151,14 +151,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         }
         return;
       } else {
-         _showSnackBar('Login failed: Could not retrieve user details.');
+         _showErrorDialog('Login Failed', 'Could not retrieve user details after authentication. Please try again.');
       }
     } on AuthException catch (e) {
-      if (mounted) { _showSnackBar(e.message, isError: true); }
+      if (mounted) { _showErrorDialog('Login Failed', e.message); }
     } catch (e) {
        if (mounted) {
          print("Unexpected login error: $e");
-         _showSnackBar('An unexpected error occurred. Please try again.', isError: true);
+         _showErrorDialog('Login Failed', 'An unexpected error occurred. Please try again.');
        }
     } finally {
       if (mounted) { setState(() { _isLoading = false; }); }
@@ -173,15 +173,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
      try {
        await authService.resendVerificationEmail();
-       if (!mounted) return;
-       _showSnackBar('Verification email resent successfully. Please check your inbox (and spam folder).', isError: false);
+       if (!mounted) return; // Show success dialog or snackbar
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification email resent successfully. Please check your inbox (and spam folder).'), backgroundColor: Colors.green));
      } on AuthException catch (e) {
        if (!mounted) return;
-       _showSnackBar(e.message, isError: true);
+       _showErrorDialog('Action Failed', e.message);
      } catch (e) {
        if (!mounted) return;
-       print("Unexpected resend error: $e");
-       _showSnackBar('An unexpected error occurred while resending email.', isError: true);
+       print("Unexpected resend error: ");
+       _showErrorDialog('Action Failed', 'An unexpected error occurred while resending the email.');
      } finally {
        if (mounted) { setState(() { _isLoading = false; }); }
      }
@@ -193,7 +193,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     final email = _emailController.text.trim();
 
     if (email.isEmpty || !email.contains('@')) {
-      _showSnackBar('Please enter your email address first to reset password.', isError: true);
+      _showErrorDialog('Invalid Input', 'Please enter your email address in the field above before attempting to reset your password.');
       return;
     }
     if (!mounted) return;
@@ -201,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reset Password'),
-        content: Text('Send a password reset link to $email?'),
+        content: Text('Send a password reset link to ?'),
         actions: [
           TextButton( onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'), ),
           TextButton( onPressed: () => Navigator.of(context).pop(true), child: const Text('Send'), style: TextButton.styleFrom(foregroundColor: brandColor), ),
@@ -214,15 +214,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
     try {
       await authService.sendPasswordResetEmail(email);
-      if (!mounted) return;
-      _showSnackBar('Password reset email sent to $email. Please check your inbox.', isError: false);
+      if (!mounted) return; // Show success dialog or snackbar
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Password reset email sent to $email. Please check your inbox.'), backgroundColor: Colors.green));
     } on AuthException catch (e) {
       if (!mounted) return;
-      _showSnackBar(e.message, isError: true);
+      _showErrorDialog('Action Failed', e.message);
     } catch (e) {
       if (!mounted) return;
-      print("Unexpected password reset error: $e");
-      _showSnackBar('An unexpected error occurred.', isError: true);
+      print("Unexpected password reset error: ");
+      _showErrorDialog('Action Failed', 'An unexpected error occurred.');
     } finally {
       if (mounted) { setState(() { _isLoading = false; }); }
     }
@@ -249,10 +249,10 @@ Email used (if different): ${enteredEmail.isNotEmpty ? enteredEmail : '[Please e
     );
     try {
       if (await canLaunchUrl(mailtoUri)) { await launchUrl(mailtoUri); }
-      else { _showSnackBar('Could not open email app. Please contact $_supportEmail', isError: true); }
+      else { _showErrorDialog('Action Failed', 'Could not open your email app. Please contact $_supportEmail manually.'); }
     } catch (e) {
-      print("Error launching mailto link: $e");
-      _showSnackBar('Could not open email app. Please contact $_supportEmail', isError: true);
+      print("Error launching mailto link: ");
+      _showErrorDialog('Action Failed', 'Could not open your email app. Please contact $_supportEmail manually.');
     }
   }
 
@@ -260,7 +260,7 @@ Email used (if different): ${enteredEmail.isNotEmpty ? enteredEmail : '[Please e
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
+    
     // Calculate next background index for the FadeTransition
     int nextBackgroundIndex = (_currentBackgroundIndex + 1) % _backgroundImages.length;
 

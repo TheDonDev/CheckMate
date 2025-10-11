@@ -1,11 +1,5 @@
 
 import 'package:checkmate/models/app_user.dart' as app_user;
-import 'package:checkmate/models/course.dart';
-import 'package:checkmate/models/department.dart';
-import 'package:checkmate/models/school.dart';
-import 'package:checkmate/models/semester.dart';
-import 'package:checkmate/models/venue.dart';
-import 'package:checkmate/models/year_of_study.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AdminService {
@@ -28,9 +22,8 @@ class AdminService {
   // --- School Management ---
 
   // Get a stream of all schools
-  Stream<List<School>> getSchools() {
-    return _db.collection('schools').snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => School.fromFirestore(doc)).toList());
+  Stream<QuerySnapshot> getSchools() {
+    return _db.collection('schools').snapshots();
   }
 
   // Add a new school
@@ -51,19 +44,16 @@ class AdminService {
   // --- Department Management ---
 
   // Get a stream of all departments
-  Stream<List<Department>> getAllDepartments() {
-    return _db.collection('departments').snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => Department.fromFirestore(doc)).toList());
+  Stream<QuerySnapshot> getAllDepartments() {
+    return _db.collection('departments').snapshots();
   }
 
   // Get a stream of departments for a specific school
-  Stream<List<Department>> getDepartments(String schoolId) {
+  Stream<QuerySnapshot> getDepartments(String schoolId) {
     return _db
         .collection('departments')
         .where('schoolId', isEqualTo: schoolId)
-        .snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((doc) => Department.fromFirestore(doc)).toList());
+        .snapshots();
   }
 
   // Add a new department
@@ -72,8 +62,10 @@ class AdminService {
   }
 
   // Update an existing department
-  Future<void> updateDepartment(String id, String name, String schoolId) {
-    return _db.collection('departments').doc(id).update({'name': name, 'schoolId': schoolId});
+  Future<void> updateDepartment(
+      String schoolId, String departmentId, String name) {
+    // Correctly reference the document in the top-level 'departments' collection
+    return _db.collection('departments').doc(departmentId).update({'name': name});
   }
 
   // Delete a department
@@ -84,13 +76,11 @@ class AdminService {
   // --- Course Management ---
 
   // Get a stream of courses for a specific department
-  Stream<List<Course>> getCourses(String departmentId) {
+  Stream<QuerySnapshot> getCourses(String departmentId) {
     return _db
         .collection('courses')
         .where('departmentId', isEqualTo: departmentId)
-        .snapshots()
-        .map((snapshot) =>
-            snapshot.docs.map((doc) => Course.fromFirestore(doc)).toList());
+        .snapshots();
   }
 
   // Add a new course
@@ -99,8 +89,9 @@ class AdminService {
   }
 
   // Update an existing course
-  Future<void> updateCourse(String id, String name, String departmentId) {
-    return _db.collection('courses').doc(id).update({'name': name, 'departmentId': departmentId});
+  Future<void> updateCourse(String courseId, String name) {
+    // Correctly reference the document in the top-level 'courses' collection
+    return _db.collection('courses').doc(courseId).update({'name': name.toUpperCase()});
   }
 
   // Delete a course
@@ -111,9 +102,8 @@ class AdminService {
   // --- Venue Management ---
 
   // Get a stream of all venues
-  Stream<List<Venue>> getVenues() {
-    return _db.collection('venues').snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => Venue.fromFirestore(doc)).toList());
+  Stream<QuerySnapshot> getVenues() {
+    return _db.collection('venues').snapshots();
   }
 
   // Add a new venue
@@ -134,32 +124,30 @@ class AdminService {
   // --- Year of Study Management ---
 
   // Get a stream of all years of study
-  Stream<List<YearOfStudy>> getYearsOfStudy() {
-    return _db.collection('yearsOfStudy').snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => YearOfStudy.fromFirestore(doc)).toList());
+  Stream<QuerySnapshot> getYearsOfStudy() {
+    return _db.collection('years_of_study').snapshots();
   }
 
   // Add a new year of study
   Future<void> addYearOfStudy(String name) {
-    return _db.collection('yearsOfStudy').add({'name': name});
+    return _db.collection('years_of_study').add({'name': name});
   }
 
   // Update an existing year of study
   Future<void> updateYearOfStudy(String id, String name) {
-    return _db.collection('yearsOfStudy').doc(id).update({'name': name});
+    return _db.collection('years_of_study').doc(id).update({'name': name});
   }
 
   // Delete a year of study
   Future<void> deleteYearOfStudy(String id) {
-    return _db.collection('yearsOfStudy').doc(id).delete();
+    return _db.collection('years_of_study').doc(id).delete();
   }
 
   // --- Semester Management ---
 
   // Get a stream of all semesters
-  Stream<List<Semester>> getSemesters() {
-    return _db.collection('semesters').snapshots().map((snapshot) =>
-        snapshot.docs.map((doc) => Semester.fromFirestore(doc)).toList());
+  Stream<QuerySnapshot> getSemesters() {
+    return _db.collection('semesters').snapshots();
   }
 
   // Add a new semester
@@ -175,5 +163,18 @@ class AdminService {
   // Delete a semester
   Future<void> deleteSemester(String id) {
     return _db.collection('semesters').doc(id).delete();
+  }
+
+  // --- Generic Document Name Fetcher ---
+  Future<String> getDocumentName(String collection, String? docId) async {
+    if (docId == null || docId.isEmpty) {
+      return 'N/A';
+    }
+    try {
+      final doc = await _db.collection(collection).doc(docId).get();
+      return doc.exists ? (doc.data()?['name'] ?? 'Unknown') : docId;
+    } catch (e) {
+      return 'Error';
+    }
   }
 }

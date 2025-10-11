@@ -1,11 +1,13 @@
-// lib/widgets/edit_lecture_dialog.dart
+import 'dart:convert'; // Import for jsonEncode
 import 'package:checkmate/models/lecture.dart';
+import 'package:checkmate/services/admin_service.dart';
 import 'package:checkmate/services/api_service.dart'; // Import ApiService
+import 'package:checkmate/widgets/document_name_widget.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:checkmate/constants/dropdown_data.dart';
 import 'dart:async'; // Needed for TimeoutException
 
 // --- UpperCaseTextFormatter ---
@@ -32,18 +34,23 @@ class EditLectureDialog extends StatefulWidget {
 class _EditLectureDialogState extends State<EditLectureDialog> {
   final _formKey = GlobalKey<FormState>();
   final ApiService apiService = ApiService();
+  final AdminService _adminService = AdminService();
   bool _isLoading = false;
 
   late TextEditingController _unitNameController;
   late TextEditingController _unitCodeController;
   late TextEditingController _onlineLinkController;
 
-  String? _selectedYear;
-  String? _selectedSemester;
-  String? _selectedVenue;
+  String? _selectedSchoolId;
+  String? _selectedDepartmentId;
+  String? _selectedCourseId;
+  String? _selectedYearId;
+  String? _selectedSemesterId;
+  String? _selectedVenueId;
+  String? _selectedVenueName; // To check for "ONLINE"
   late DateTime _selectedDate;
   late TimeOfDay _selectedStartTime; //  TimeOfDay for picker state
-  late TimeOfDay _selectedEndTime; 
+  late TimeOfDay _selectedEndTime;
 
   static const Color brandColor = Color(0xFF0175C2);
 
@@ -55,9 +62,12 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
     _unitCodeController = TextEditingController(text: widget.lecture.unitCode);
     _onlineLinkController = TextEditingController(text: widget.lecture.onlineLink ?? '');
 
-    _selectedYear = yearsList.contains(widget.lecture.yearOfStudy) ? widget.lecture.yearOfStudy : null;
-    _selectedSemester = semestersList.contains(widget.lecture.semester) ? widget.lecture.semester : null;
-    _selectedVenue = venuesList.contains(widget.lecture.venue) ? widget.lecture.venue : null;
+    _selectedSchoolId = widget.lecture.school;
+    _selectedDepartmentId = widget.lecture.department;
+    _selectedCourseId = widget.lecture.course;
+    _selectedYearId = widget.lecture.yearOfStudy;
+    _selectedSemesterId = widget.lecture.semester;
+    _selectedVenueId = widget.lecture.venue;
 
     // Ensure date/time are initialized correctly from the lecture object
     _selectedDate = widget.lecture.lectureDate?.toLocal() ?? DateTime.now(); // Use local time for display
@@ -72,6 +82,17 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       print("[EditDialog Init] Initial Start Time (Local): $_selectedStartTime");
       print("[EditDialog Init] Initial End Time (Local): $_selectedEndTime");
       print("[EditDialog Init] Initial Date (Local): $_selectedDate");
+    }
+
+    // Pre-fetch the initial venue name to correctly show/hide the online link field on load
+    if (_selectedVenueId != null) {
+      _adminService.getVenues().first.then((snapshot) {
+        final venueDocs = snapshot.docs.where((doc) => doc.id == _selectedVenueId);
+        if (venueDocs.isNotEmpty && mounted) {
+          final venueDoc = venueDocs.first;
+          setState(() => _selectedVenueName = (venueDoc.data() as Map<String, dynamic>)['name']);
+        }
+      });
     }
   }
 
@@ -200,24 +221,26 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
   // Method to handle form submission for update
   Future<void> _updateLecture() async {
     if (!_formKey.currentState!.validate()) {
-      _showValidationError('Please fill in all required fields correctly.');
+      _showErrorDialog('Validation Error', 'Please fill in all required fields correctly.');
       return;
     }
 
-    if (_selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
-       _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
+    if (_selectedSchoolId == null || _selectedDepartmentId == null || _selectedCourseId == null || _selectedYearId == null || _selectedSemesterId == null || _selectedVenueId == null) {
+       _showErrorDialog('Validation Error', 'Please fill in all required fields, including schedule and venue.'); return;
     }
 
-    // *** Use local DateTime constructor ***
-    final DateTime startDateTime = DateTime( // Use local constructor
+    // 1. Combine selected date and time into a local DateTime object.
+    final DateTime localStartDateTime = DateTime(
       _selectedDate.year, _selectedDate.month, _selectedDate.day,
       _selectedStartTime.hour, _selectedStartTime.minute,
     );
-    final DateTime endDateTime = DateTime( // Use local constructor
+    final DateTime localEndDateTime = DateTime(
       _selectedDate.year, _selectedDate.month, _selectedDate.day,
       _selectedEndTime.hour, _selectedEndTime.minute,
     );
-
+    // 2. Convert the local DateTime to UTC for storage and API calls.
+    final DateTime startDateTime = localStartDateTime.toUtc();
+    final DateTime endDateTime = localEndDateTime.toUtc();
     if (kDebugMode) {
       print("[EditDialog Update] Combined Start DateTime (Local): ${startDateTime.toIso8601String()}");
       print("[EditDialog Update] Combined End DateTime (Local): ${endDateTime.toIso8601String()}");
@@ -225,20 +248,20 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
 
     // Validate time order (using local times is fine here)
     if (!endDateTime.isAfter(startDateTime)) {
-      _showValidationError('End time must be after start time.');
+      _showErrorDialog('Validation Error', 'End time must be after start time.');
       return;
     }
 
     // Handle online link based on venue
-    String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
+    String? onlineLinkValue = _selectedVenueName?.toUpperCase() == 'ONLINE' ? _onlineLinkController.text.trim() : null;
     // Additional validation for online link if venue is ONLINE
-    if (_selectedVenue == 'ONLINE' && (onlineLinkValue == null || onlineLinkValue.isEmpty)) {
-       _showValidationError('Online link is required for ONLINE venue.'); return;
+    if (_selectedVenueName?.toUpperCase() == 'ONLINE' && (onlineLinkValue == null || onlineLinkValue.isEmpty)) {
+       _showErrorDialog('Validation Error', 'Online link is required for ONLINE venue.'); return;
     }
-    if (_selectedVenue == 'ONLINE' && onlineLinkValue != null) {
+    if (_selectedVenueName?.toUpperCase() == 'ONLINE' && onlineLinkValue != null) {
         final uri = Uri.tryParse(onlineLinkValue);
         if (uri == null || !uri.hasAbsolutePath || !uri.hasScheme || !(uri.isScheme('http') || uri.isScheme('https'))) {
-           _showValidationError('Please enter a valid URL for the online link (e.g., https://...).'); return;
+           _showErrorDialog('Validation Error', 'Please enter a valid URL for the online link (e.g., https://...).'); return;
         }
     }
 
@@ -249,12 +272,15 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
     final Map<String, dynamic> updatedData = {
       'unitName': _unitNameController.text.trim(),
       'unitCode': _unitCodeController.text.trim().toUpperCase(),
-      'venue': _selectedVenue,
-      'yearOfStudy': _selectedYear,
-      'semester': _selectedSemester,
+      'school': _selectedSchoolId,
+      'department': _selectedDepartmentId,
+      'course': _selectedCourseId,
+      'venue': _selectedVenueId,
+      'yearOfStudy': _selectedYearId,
+      'semester': _selectedSemesterId,
       // Send dates/times in ISO 8601 format with offset.
       'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), 
-      'startTime': startDateTime.toIso8601String(), // Includes offset
+      'startTime': startDateTime.toIso8601String(), 
       'endTime': endDateTime.toIso8601String(),     
       'onlineLink': onlineLinkValue,
     };
@@ -278,7 +304,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
 
       if (mounted) {
         String displayMessage = (e is ApiException) ? e.message : "An unexpected error occurred during update.";
-        _showValidationError('Failed to update lecture: $displayMessage');
+        _showErrorDialog('Update Failed', displayMessage);
       }
     } finally {
       if (mounted) { setState(() => _isLoading = false); }
@@ -286,17 +312,29 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
   }
 
   // Helper to show validation error snackbar
-  void _showValidationError(String message) {
+  void _showErrorDialog(String title, String content) {
      if (!mounted) return;
-     ScaffoldMessenger.of(context).showSnackBar(
-       SnackBar(
-         content: Text(message),
-         backgroundColor: Theme.of(context).colorScheme.error,
-         behavior: SnackBarBehavior.floating,
-         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-         margin: const EdgeInsets.all(10),
-       ),
-     );
+     showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Row(
+              children: [
+                Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error),
+                const SizedBox(width: 10),
+                Text(title),
+              ],
+            ),
+            content: Text(content),
+            actions: <Widget>[
+              TextButton(
+                child: const Text('OK'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              ),
+            ],
+          );
+        });
   }
 
   @override
@@ -357,14 +395,80 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                 ),
                 const SizedBox(height: 12),
 
-                // --- Course (Read-Only) ---
-                InputDecorator(
-                  decoration: _inputDecoration('Course', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200],
-                    prefixIcon: Icon(Icons.book_outlined, color: brandColor.withOpacity(0.7)),
-                  ),
-                  child: Text(widget.lecture.course ?? 'N/A', style: const TextStyle(fontSize: 16)),
+                // --- School, Department, Course Dropdowns ---
+                StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getSchools(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                    var schools = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('School', prefixIcon: const Icon(Icons.school_outlined)),
+                      value: schools.any((doc) => doc.id == _selectedSchoolId) ? _selectedSchoolId : null,
+                      items: schools.map((school) {
+                        final data = school.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(value: school.id, child: Text(data['name'].toUpperCase(), overflow: TextOverflow.ellipsis));
+                      }).toList(),
+                      onChanged: (String? newValue) {
+                        setState(() {
+                          _selectedSchoolId = newValue;
+                          _selectedDepartmentId = null;
+                          _selectedCourseId = null;
+                        });
+                      },
+                      validator: (value) => value == null ? 'School is required' : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
+                const SizedBox(height: 12),
+                if (_selectedSchoolId != null)
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _adminService.getDepartments(_selectedSchoolId!),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                      var departments = snapshot.data!.docs;
+                      return DropdownButtonFormField<String>(
+                        decoration: _inputDecoration('Department', prefixIcon: const Icon(Icons.business_outlined)),
+                        value: departments.any((doc) => doc.id == _selectedDepartmentId) ? _selectedDepartmentId : null,
+                        items: departments.map((department) {
+                          final data = department.data() as Map<String, dynamic>;
+                          return DropdownMenuItem<String>(value: department.id, child: Text(data['name'].toUpperCase(), overflow: TextOverflow.ellipsis));
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedDepartmentId = newValue;
+                            _selectedCourseId = null;
+                          });
+                        },
+                        validator: (value) => value == null ? 'Department is required' : null,
+                        isExpanded: true,
+                      );
+                    },
+                  ),
+                const SizedBox(height: 12),
+                if (_selectedDepartmentId != null)
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _adminService.getCourses(_selectedDepartmentId!),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                      var courses = snapshot.data!.docs;
+                      return DropdownButtonFormField<String>(
+                        decoration: _inputDecoration('Course', prefixIcon: const Icon(Icons.book_outlined)),
+                        value: courses.any((doc) => doc.id == _selectedCourseId) ? _selectedCourseId : null,
+                        items: courses.map((course) {
+                          final data = course.data() as Map<String, dynamic>;
+                          return DropdownMenuItem<String>(value: course.id, child: Text(data['name'].toUpperCase(), overflow: TextOverflow.ellipsis));
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedCourseId = newValue;
+                          });
+                        },
+                        validator: (value) => value == null ? 'Course is required' : null,
+                        isExpanded: true,
+                      );
+                    },
+                  ),
                 const SizedBox(height: 12),
 
                 // --- Year & Semester Dropdowns ---
@@ -372,24 +476,44 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                    crossAxisAlignment: CrossAxisAlignment.start,
                    children: [
                      Expanded(
-                       child: DropdownButtonFormField<String>(
-                         decoration: _inputDecoration('Year', prefixIcon: const Icon(Icons.calendar_view_day_outlined)),
-                         value: _selectedYear,
-                         items: yearsList.map((String year) => DropdownMenuItem<String>(value: year, child: Text(year))).toList(),
-                         onChanged: (String? newValue) { setState(() { _selectedYear = newValue; }); },
-                         validator: (value) => value == null ? 'Required' : null,
-                         isExpanded: true,
+                       child: StreamBuilder<QuerySnapshot>(
+                         stream: _adminService.getYearsOfStudy(),
+                         builder: (context, snapshot) {
+                           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                           var years = snapshot.data!.docs;
+                           return DropdownButtonFormField<String>(
+                             decoration: _inputDecoration('Year', prefixIcon: const Icon(Icons.calendar_view_day_outlined)),
+                             value: years.any((doc) => doc.id == _selectedYearId) ? _selectedYearId : null,
+                             items: years.map((year) {
+                               final data = year.data() as Map<String, dynamic>;
+                               return DropdownMenuItem<String>(value: year.id, child: Text(data['name'].toUpperCase()));
+                             }).toList(),
+                             onChanged: (String? newValue) { setState(() { _selectedYearId = newValue; }); },
+                             validator: (value) => value == null ? 'Required' : null,
+                             isExpanded: true,
+                           );
+                         },
                        ),
                      ),
                      const SizedBox(width: 10),
                      Expanded(
-                       child: DropdownButtonFormField<String>(
-                         decoration: _inputDecoration('Semester', prefixIcon: const Icon(Icons.filter_list_alt)),
-                         value: _selectedSemester,
-                         items: semestersList.map((String semester) => DropdownMenuItem<String>(value: semester, child: Text(semester))).toList(),
-                         onChanged: (String? newValue) { setState(() { _selectedSemester = newValue; }); },
-                         validator: (value) => value == null ? 'Required' : null,
-                         isExpanded: true,
+                       child: StreamBuilder<QuerySnapshot>(
+                         stream: _adminService.getSemesters(),
+                         builder: (context, snapshot) {
+                           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                           var semesters = snapshot.data!.docs;
+                           return DropdownButtonFormField<String>(
+                             decoration: _inputDecoration('Semester', prefixIcon: const Icon(Icons.filter_list_alt)),
+                             value: semesters.any((doc) => doc.id == _selectedSemesterId) ? _selectedSemesterId : null,
+                             items: semesters.map((semester) {
+                               final data = semester.data() as Map<String, dynamic>;
+                               return DropdownMenuItem<String>(value: semester.id, child: Text(data['name'].toUpperCase()));
+                             }).toList(),
+                             onChanged: (String? newValue) { setState(() { _selectedSemesterId = newValue; }); },
+                             validator: (value) => value == null ? 'Required' : null,
+                             isExpanded: true,
+                           );
+                         },
                        ),
                      ),
                    ],
@@ -397,31 +521,52 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                 const SizedBox(height: 12),
 
                 // --- Venue Dropdown ---
-                DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
-                  value: _selectedVenue,
-                  items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
-                  onChanged: (val) => setState(() => _selectedVenue = val),
-                  validator: (value) => value == null ? 'Venue is required' : null,
-                  isExpanded: true,
+                StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getVenues(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                    var venues = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
+                      value: venues.any((doc) => doc.id == _selectedVenueId) ? _selectedVenueId : null,
+                      items: venues.map((venue) {
+                        final data = venue.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(value: venue.id, child: Text(data['name'] ?? ''));
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedVenueId = val;
+                          // Find the name corresponding to the selected ID
+                          final selectedDoc = venues.where((doc) => doc.id == val).isNotEmpty
+                              ? venues.firstWhere((doc) => doc.id == val)
+                              : null;
+                          _selectedVenueName = selectedDoc != null ? (selectedDoc.data() as Map<String, dynamic>)['name'] : null;
+                        });
+                      },
+                      validator: (value) => value == null ? 'Venue is required' : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
                 // --- END Venue Dropdown ---
 
                 // --- Conditional Online Link Field ---
-                if (_selectedVenue == 'ONLINE') ...[
+                if (_selectedVenueName?.toUpperCase() == 'ONLINE') ...[
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _onlineLinkController,
                     decoration: _inputDecoration(
                       'Online Lecture Link',
                       prefixIcon: const Icon(Icons.link_outlined),
-                      isRequired: true, // Required only when venue is ONLINE
+                      isRequired: true,
                       hint: 'e.g., https://meet.google.com/abc-xyz'
                     ),
                     keyboardType: TextInputType.url,
                     validator: (value) {
                       // Only validate if the venue is actually ONLINE
-                      if (_selectedVenue == 'ONLINE') {
+                      // This validation runs only when the field is visible.
+                      // The visibility is controlled by `_selectedVenueName`.
+                      if (_selectedVenueName?.toUpperCase() == 'ONLINE') {
                         if (value == null || value.trim().isEmpty) {
                           return 'Online link is required for ONLINE venue';
                         }
@@ -446,12 +591,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                   onTap: () => _selectDate(context),
                   borderRadius: BorderRadius.circular(12),
                   child: InputDecorator(
-                    decoration: _inputDecoration('Date', prefixIcon: const Icon(Icons.calendar_today_outlined), isRequired: true).copyWith(
-                      hintText: _selectedDate == null ? 'Select Date' : null,
-                    ),
-                    child: _selectedDate == null
-                        ? null
-                        : Text(DateFormat.yMMMEd().format(_selectedDate), style: const TextStyle(fontSize: 16)),
+                    decoration: _inputDecoration('Date', prefixIcon: const Icon(Icons.calendar_today_outlined), isRequired: true),
+                    child: Text(DateFormat.yMMMEd().format(_selectedDate), style: const TextStyle(fontSize: 16)),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -463,12 +604,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                         onTap: () => _selectTime(context, true),
                         borderRadius: BorderRadius.circular(12),
                         child: InputDecorator(
-                          decoration: _inputDecoration('Start Time', prefixIcon: const Icon(Icons.access_time_outlined), isRequired: true).copyWith(
-                            hintText: _selectedStartTime == null ? 'Select Start' : null,
-                          ),
-                          child: _selectedStartTime == null
-                              ? null
-                              : Text(_selectedStartTime.format(context), style: const TextStyle(fontSize: 16)),
+                          decoration: _inputDecoration('Start Time', prefixIcon: const Icon(Icons.access_time_outlined), isRequired: true),
+                          child: Text(_selectedStartTime.format(context), style: const TextStyle(fontSize: 16)),
                         ),
                       ),
                     ),
@@ -478,12 +615,8 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
                         onTap: () => _selectTime(context, false),
                         borderRadius: BorderRadius.circular(12),
                         child: InputDecorator(
-                          decoration: _inputDecoration('End Time', prefixIcon: const Icon(Icons.update_outlined), isRequired: true).copyWith(
-                            hintText: _selectedEndTime == null ? 'Select End' : null,
-                          ),
-                          child: _selectedEndTime == null
-                              ? null
-                              : Text(_selectedEndTime.format(context), style: const TextStyle(fontSize: 16)),
+                          decoration: _inputDecoration('End Time', prefixIcon: const Icon(Icons.update_outlined), isRequired: true),
+                          child: Text(_selectedEndTime.format(context), style: const TextStyle(fontSize: 16)),
                         ),
                       ),
                     ),

@@ -1,6 +1,7 @@
 // lib/wrapper.dart
 import 'package:checkmate/models/app_user.dart' as app_user;
-import 'package:checkmate/screens/lecturer_dashboard.dart';
+import 'package:checkmate/screens/admin_dashboard.dart';
+import 'package:checkmate/screens/lecturer_dashboard.dart'; // This was missing
 import 'package:checkmate/screens/student_dashboard.dart';
 import 'package:checkmate/screens/welcome_screen.dart';
 // Import the EmailVerificationScreen if you create one
@@ -81,6 +82,9 @@ class Wrapper extends StatelessWidget {
           // --- Navigate Based on User Role ---
           // Use the role from the custom appUser object (fetched from Firestore)
           switch (appUser.role) {
+            case 'admin':
+              print("Wrapper: Navigating to AdminDashboard for ${appUser.email}");
+              return AdminDashboard(currentUser: appUser);
             case 'lecturer':
               print("Wrapper: Navigating to LecturerDashboard for ${appUser.email}");
               return LecturerDashboard(currentUser: appUser);

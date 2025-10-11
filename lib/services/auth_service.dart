@@ -23,6 +23,7 @@ class AuthService extends ChangeNotifier {
   // --- Add the special user email constant ---
   static const String _specialBypassEmail = "donaldmwanga33@gmail.com";
   static const String _specialBypassName = "DONALD MWANGA";
+  static const String _specialTestUserEmail = "basenahabi@au.ac.ke";
 
 
   app_user.User? _currentUser; // Cache the current user model
@@ -156,6 +157,7 @@ class AuthService extends ChangeNotifier {
     final trimmedSemester = semester?.trim();
 
     final bool isAdmin = trimmedEmail == _specialBypassEmail && trimmedName.toUpperCase() == _specialBypassName;
+    final bool isTestUser = trimmedEmail == _specialTestUserEmail;
 
     // Validate required fields (use trimmed versions where applicable)
     if (!isAdmin && (trimmedName.isEmpty || trimmedEmail.isEmpty || password.isEmpty || trimmedPhoneNumber.isEmpty ||
@@ -174,14 +176,15 @@ class AuthService extends ChangeNotifier {
 
       if (firebaseUser != null) {
         // Send verification email (best effort), *unless* it's the special user
-        if (!firebaseUser.emailVerified && !isAdmin) {
+        if (!firebaseUser.emailVerified && !isAdmin && !isTestUser) {
            try {
               await firebaseUser.sendEmailVerification();
               print("Verification email sent to $trimmedEmail");
            } catch (e) {
-              print("Error sending verification email: $e"); // Log error but continue
+              print("Error sending verification email: $e"); 
+              rethrow;
            }
-        } else if (isAdmin) {
+        } else if (isAdmin || isTestUser) {
             print("Skipping verification email for special user: $trimmedEmail");
         }
 
@@ -194,25 +197,24 @@ class AuthService extends ChangeNotifier {
         }
 
         // Set isVerified true ONLY for the special user during signup
-        final bool initialVerificationStatus = isAdmin;
+        final bool initialVerificationStatus = isAdmin || isTestUser;
 
         // --- MODIFICATION: Apply .toUpperCase() to specific fields before saving ---
         Map<String, dynamic> userData = {
           'uid': firebaseUser.uid,
-          'name': trimmedName.toUpperCase(), // Save name in uppercase
+          'name': trimmedName, // Save name as entered
           'email': trimmedEmail, // Save email in lowercase
           'phoneNumber': trimmedPhoneNumber, // Save phone number as trimmed
           'role': role, // Save role as determined (likely lowercase)
-          'school': school?.trim().toUpperCase(), // Save school trimmed & uppercase
-          'department': department?.trim().toUpperCase(), // Save department trimmed & uppercase
-          'course': course?.trim().toUpperCase(), // Save course trimmed & uppercase
+          'school': school, // This is already the ID, no processing needed
+          'department': department, // This is already the ID
+          'course': course, // This is already the ID
           'createdAt': FieldValue.serverTimestamp(),
           'isVerified': initialVerificationStatus,
           // Save registration number in uppercase only if student and provided
           'registrationNumber': isStudent ? trimmedRegNumber?.toUpperCase() : null,
-          // *** Save year/semester trimmed & uppercase only if student and provided ***
-          'yearOfStudy': isStudent ? trimmedYearOfStudy?.toUpperCase() : null,
-          'semester': isStudent ? trimmedSemester?.toUpperCase() : null,
+          'yearOfStudy': isStudent ? yearOfStudy : null, // This is already the ID
+          'semester': isStudent ? semester : null, // This is already the ID
         };
         // Remove any keys where the value is null (like registrationNumber for non-students)
         userData.removeWhere((key, value) => value == null);
@@ -265,16 +267,17 @@ class AuthService extends ChangeNotifier {
 
       // --- MODIFICATION START: Bypass verification check for the special user ---
       final bool isSpecialUser = freshFbUser.email?.toLowerCase() == _specialBypassEmail;
+      final bool isTestUser = freshFbUser.email?.toLowerCase() == _specialTestUserEmail;
 
       // 3. Check verification status ONLY if it's NOT the special user
-      if (!isSpecialUser && !freshFbUser.emailVerified) {
+      if (!isSpecialUser && !isTestUser && !freshFbUser.emailVerified) {
         print("Login attempt halted: Email not verified for ${freshFbUser.email}");
         // Throw specific exception instead of signing out
         throw AuthException(
           'Please verify your email before logging in. Check your inbox (and spam folder). You can use the "Resend Email" button.',
           code: 'email-not-verified' // Add a code for specific handling in UI
         );
-      } else if (isSpecialUser) {
+      } else if (isSpecialUser || isTestUser) {
           print("Login verification check bypassed for special user: ${freshFbUser.email}");
       }
       // --- MODIFICATION END ---
@@ -333,7 +336,7 @@ class AuthService extends ChangeNotifier {
     }
 
     // --- Don't allow resend for the special bypass user ---
-    if (fbUser.email?.toLowerCase() == _specialBypassEmail) {
+    if (fbUser.email?.toLowerCase() == _specialBypassEmail || fbUser.email?.toLowerCase() == _specialTestUserEmail) {
         print("Resend verification email skipped for special user: ${fbUser.email}");
         throw AuthException('Email verification is not required for this account.');
     }

@@ -7,6 +7,7 @@ import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/models/attendance_record.dart'; // Ensure this path is correct
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/services/storage_service.dart'; // Import StorageService
+import 'package:checkmate/widgets/document_name_widget.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for Timestamp comparison
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -248,15 +249,13 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
         return null; // Return null on failure to upload
       }
 
-    } catch (e, s) { // Catch stack trace as well
+    } catch (e, s) {
       if (kDebugMode) {
          print("[DEBUG] Error exporting attendance CSV: $e");
          print("[DEBUG] Stack trace: $s");
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error processing attendance file: ${e.toString()}'), backgroundColor: Colors.red),
-        );
+        _showErrorDialog('Export Error', 'An error occurred while processing the attendance file: ${e.toString()}');
       }
       return null; // Return null on error
     } finally {
@@ -267,6 +266,21 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
     }
   }
   // --- End CSV Export Logic ---
+
+  // Helper to show a user-friendly error dialog
+  void _showErrorDialog(String title, String content) {
+    if (!mounted) return;
+    showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Row(children: [ Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error), const SizedBox(width: 10), Text(title), ]),
+            content: Text(content),
+            actions: <Widget>[ TextButton(child: const Text('OK'), onPressed: () => Navigator.of(dialogContext).pop()), ],
+          );
+        });
+  }
 
   // --- _captureAndShareQrCode ---
   Future<void> _captureAndShareQrCode() async {
@@ -309,9 +323,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       } else {
         if (kDebugMode) print('[DEBUG] Sharing status: ${result.status}, Raw: ${result.raw}');
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not complete share action: ${result.status}'), backgroundColor: Colors.orange),
-          );
+          _showErrorDialog('Share Incomplete', 'The share action could not be completed. Status: ${result.status}');
         }
       }
     } catch (e, s) { // Catch stack trace
@@ -320,9 +332,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
          print("[DEBUG] Stack trace: $s");
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error preparing QR code: ${e.toString()}'), backgroundColor: Colors.red),
-        );
+        _showErrorDialog('QR Code Error', 'An error occurred while preparing the QR code for sharing: ${e.toString()}');
       }
     }
   }
@@ -330,9 +340,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   // --- _showQrCodeDialog  ---
   void _showQrCodeDialog() {
     if (widget.lecture.id.isEmpty) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text('Error: Lecture ID is missing.'), backgroundColor: Colors.red),
-       );
+       _showErrorDialog('QR Generation Failed', 'Cannot generate QR code because the Lecture ID is missing.');
        return;
     }
     final screenWidth = MediaQuery.of(context).size.width;
@@ -375,9 +383,13 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                         'Venue: ${widget.lecture.venue}',
+                         'Venue: ', // Keep the label
                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade700),
                          textAlign: TextAlign.center,
+                      ),
+                      DocumentNameWidget(
+                        collection: 'venues', documentId: widget.lecture.venue,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 20),
                       RepaintBoundary(
@@ -457,8 +469,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final appBarSubtitle = '${widget.lecture.formattedDate} | ${widget.lecture.formattedStartTime} - ${widget.lecture.formattedEndTime} | ${widget.lecture.venue}';
-    final dateTimeFormatter = DateFormat('MMM d, hh:mm a');
+    final DateFormat dateTimeFormatter = DateFormat('yyyy-MM-dd HH:mm:ss');
 
     return Scaffold(
       appBar: AppBar(
@@ -470,7 +481,7 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
           preferredSize: const Size.fromHeight(25.0),
           child: Padding(
             padding: const EdgeInsets.only(bottom: 8.0, left: 16.0, right: 16.0),
-            child: Text( appBarSubtitle, style: TextStyle( color: Colors.white.withOpacity(0.9), fontSize: 13, ), textAlign: TextAlign.center, overflow: TextOverflow.ellipsis, ),
+            child: Text( '${widget.lecture.formattedDate} | ${widget.lecture.formattedStartTime} - ${widget.lecture.formattedEndTime}', style: TextStyle( color: Colors.white.withOpacity(0.9), fontSize: 13, ), textAlign: TextAlign.center, overflow: TextOverflow.ellipsis, ),
           ),
         ),
         actions: [

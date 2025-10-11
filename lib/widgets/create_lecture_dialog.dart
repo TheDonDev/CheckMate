@@ -1,9 +1,10 @@
-// lib/widgets/create_lecture_dialog.dart
 import 'dart:convert'; // Import for jsonEncode
-import 'package:checkmate/constants/dropdown_data.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/api_service.dart';
+import 'package:checkmate/services/admin_service.dart';
+import 'package:checkmate/widgets/document_name_widget.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // Import kDebugMode
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +34,7 @@ class CreateLectureDialog extends StatefulWidget {
 class _CreateLectureDialogState extends State<CreateLectureDialog> {
   final _formKey = GlobalKey<FormState>();
   final _apiService = ApiService();
+  final _adminService = AdminService();
 
   // Controllers
   final _lecturerPhoneController = TextEditingController();
@@ -41,9 +43,13 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   final _onlineLinkController = TextEditingController();
 
   // State variables
-  String? _selectedYear;
-  String? _selectedSemester;
-  String? _selectedVenue;
+  String? _selectedSchoolId;
+  String? _selectedDepartmentId;
+  String? _selectedCourseId;
+  String? _selectedYearId;
+  String? _selectedSemesterId;
+  String? _selectedVenueId;
+  String? _selectedVenueName; // To check for "ONLINE"
   DateTime? _selectedDate;
   TimeOfDay? _selectedStartTime;
   TimeOfDay? _selectedEndTime;
@@ -52,7 +58,8 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
   @override
   void initState() {
     super.initState();
-    _lecturerPhoneController.text = widget.currentUser.phoneNumber ?? '';
+    _lecturerPhoneController.text = widget.currentUser.phoneNumber;
+    _selectedSchoolId = widget.currentUser.school;
   }
 
   @override
@@ -175,34 +182,37 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
 
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) {
-       _showValidationError('Please fill in all required fields correctly.');
+       _showErrorDialog('Validation Error', 'Please fill in all required fields correctly.');
        return;
     }
 
-    if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedYear == null || _selectedSemester == null || _selectedVenue == null) {
-       _showValidationError('Please fill in all required fields, including schedule and venue.'); return;
+    if (_selectedDate == null || _selectedStartTime == null || _selectedEndTime == null || _selectedSchoolId == null || _selectedDepartmentId == null || _selectedCourseId == null || _selectedYearId == null || _selectedSemesterId == null || _selectedVenueId == null) {
+       _showErrorDialog('Validation Error', 'Please fill in all required fields, including schedule and venue.'); return;
     }
 
-    // Combine Date and Time - IMPORTANT: Ensure these are in the correct local time
-    final DateTime startDateTime = DateTime(
+    // 1. Combine selected date and time into a local DateTime object.
+    final DateTime localStartDateTime = DateTime(
       _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
       _selectedStartTime!.hour, _selectedStartTime!.minute,
     );
-    final DateTime endDateTime = DateTime(
+    final DateTime localEndDateTime = DateTime(
       _selectedDate!.year, _selectedDate!.month, _selectedDate!.day,
       _selectedEndTime!.hour, _selectedEndTime!.minute,
     );
+    // 2. Convert the local DateTime to UTC for storage and API calls.
+    final DateTime startDateTime = localStartDateTime.toUtc();
+    final DateTime endDateTime = localEndDateTime.toUtc();
 
     if (!endDateTime.isAfter(startDateTime)) {
-       _showValidationError('End time must be after start time.'); return;
+       _showErrorDialog('Validation Error', 'End time must be after start time.'); return;
     }
 
     final DateTime today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
     if (_selectedDate!.isBefore(today)) {
-        _showValidationError('Cannot create a lecture for a past date.'); return;
+        _showErrorDialog('Validation Error', 'Cannot create a lecture for a past date.'); return;
     }
 
-    String? onlineLinkValue = _selectedVenue == 'ONLINE' ? _onlineLinkController.text.trim() : null;
+    String? onlineLinkValue = _selectedVenueName?.toUpperCase() == 'ONLINE' ? _onlineLinkController.text.trim() : null;
 
     // Create the Lecture object
     final newLecture = Lecture(
@@ -210,18 +220,18 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
       lecturerId: widget.currentUser.id,
       lecturerName: widget.currentUser.name,
       lecturerPhone: _lecturerPhoneController.text.trim().isEmpty ? null : _lecturerPhoneController.text.trim(),
-      school: widget.currentUser.school ?? 'N/A', // Use lecturer's profile data
-      department: widget.currentUser.department ?? 'N/A', // Use lecturer's profile data
-      course: widget.currentUser.course ?? 'N/A', // Use lecturer's profile data
-      yearOfStudy: _selectedYear!,
-      semester: _selectedSemester!,
+      school: _selectedSchoolId!, 
+      department: _selectedDepartmentId!, 
+      course: _selectedCourseId!, 
+      yearOfStudy: _selectedYearId!,
+      semester: _selectedSemesterId!,
       unitName: _unitNameController.text.trim(),
       unitCode: _unitCodeController.text.trim(),
       // Pass DateTime objects directly; toApiJson should handle conversion
       lectureDate: _selectedDate,
       startTime: startDateTime,
       endTime: endDateTime,
-      venue: _selectedVenue!,
+      venue: _selectedVenueId!,
       onlineLink: onlineLinkValue,
       createdAt: null, // Will be set by backend
     );
@@ -262,7 +272,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
           errorMessage += ' Please try again.'; // Generic message
           if (kDebugMode) print('[CreateLectureDialog] General Error: ${e.toString()}');
        }
-       _showValidationError(errorMessage);
+       _showErrorDialog('Creation Failed', errorMessage);
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -282,6 +292,23 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
          margin: const EdgeInsets.all(10),
        ),
      );
+  }
+
+  void _showErrorDialog(String title, String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -316,49 +343,153 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   // Optional: Add validation for phone format if needed
                 ),
                 const SizedBox(height: 12),
-                InputDecorator(
-                  decoration: _inputDecoration('School', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200],
-                    prefixIcon: Icon(Icons.school_outlined, color: CreateLectureDialog.brandColor.withOpacity(0.7)),
-                  ),
-                  child: Text(widget.currentUser.school ?? 'N/A', style: const TextStyle(fontSize: 16)),
-                ),
-                const SizedBox(height: 12),
-                InputDecorator(
-                  decoration: _inputDecoration('Department', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200],
-                    prefixIcon: Icon(Icons.business_outlined, color: CreateLectureDialog.brandColor.withOpacity(0.7)),
-                  ),
-                  child: Text(widget.currentUser.department ?? 'N/A', style: const TextStyle(fontSize: 16)),
-                ),
-                const SizedBox(height: 12),
-                InputDecorator(
-                  decoration: _inputDecoration('Course', isRequired: false).copyWith(
-                    fillColor: Colors.grey[200],
-                    prefixIcon: Icon(Icons.book_outlined, color: CreateLectureDialog.brandColor.withOpacity(0.7)),
-                  ),
-                  child: Text(widget.currentUser.course ?? 'N/A', style: const TextStyle(fontSize: 16)),
-                ),
-                const SizedBox(height: 12),
                 // --- End Read-Only Fields ---
 
                 // --- Dropdowns ---
-                DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Year of Study', prefixIcon: const Icon(Icons.calendar_view_day_outlined)),
-                  value: _selectedYear,
-                  items: yearsList.map((String year) => DropdownMenuItem<String>(value: year, child: Text(year))).toList(),
-                  onChanged: (String? newValue) { setState(() { _selectedYear = newValue; }); },
-                  validator: (value) => value == null ? 'Year of study is required' : null,
-                  isExpanded: true,
+                StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getSchools(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return const Text('Error loading schools');
+                    }
+                    if (!snapshot.hasData) return const Text('No schools found');
+                    var schools = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('School', prefixIcon: const Icon(Icons.school_outlined)),
+                      value: _selectedSchoolId,
+                      items: schools.map((school) {
+                        final data = school.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(value: school.id, child: Text(data['name'].toUpperCase(), overflow: TextOverflow.ellipsis));
+                      }).toList(),
+                      onChanged: (String? newValue) {
+                        setState(() {
+                          _selectedSchoolId = newValue;
+                          _selectedDepartmentId = null;
+                          _selectedCourseId = null;
+                        });
+                      },
+                      validator: (value) => value == null ? 'School is required' : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Semester', prefixIcon: const Icon(Icons.filter_list_alt)),
-                  value: _selectedSemester,
-                  items: semestersList.map((String semester) => DropdownMenuItem<String>(value: semester, child: Text(semester))).toList(),
-                  onChanged: (String? newValue) { setState(() { _selectedSemester = newValue; }); },
-                  validator: (value) => value == null ? 'Semester is required' : null,
-                  isExpanded: true,
+                if (_selectedSchoolId != null)
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _adminService.getDepartments(_selectedSchoolId!),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return const Text('Error loading departments');
+                      }
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const Text('No departments found for this school');
+                      }
+                      var departments = snapshot.data!.docs;
+                      return DropdownButtonFormField<String>(
+                        decoration: _inputDecoration('Department', prefixIcon: const Icon(Icons.business_outlined)),
+                        value: _selectedDepartmentId,
+                        items: departments.map((department) {
+                          final data = department.data() as Map<String, dynamic>;
+                          return DropdownMenuItem<String>(value: department.id, child: Text(data['name'].toUpperCase(), overflow: TextOverflow.ellipsis));
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedDepartmentId = newValue;
+                            _selectedCourseId = null;
+                          });
+                        },
+                        validator: (value) => value == null ? 'Department is required' : null,
+                        isExpanded: true,
+                      );
+                    },
+                  ),
+                const SizedBox(height: 12),
+                if (_selectedDepartmentId != null)
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _adminService.getCourses(_selectedDepartmentId!),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return const Text('Error loading courses');
+                      }
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const Text('No courses found for this department');
+                      }
+                      var courses = snapshot.data!.docs;
+                      return DropdownButtonFormField<String>(
+                        decoration: _inputDecoration('Course', prefixIcon: const Icon(Icons.book_outlined)),
+                        value: _selectedCourseId,
+                        items: courses.map((course) {
+                          final data = course.data() as Map<String, dynamic>;
+                          return DropdownMenuItem<String>(value: course.id, child: Text(data['name'].toUpperCase(), overflow: TextOverflow.ellipsis));
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedCourseId = newValue;
+                          });
+                        },
+                        validator: (value) => value == null ? 'Course is required' : null,
+                        isExpanded: true,
+                      );
+                    },
+                  ),
+                const SizedBox(height: 12),
+                StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getYearsOfStudy(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return const Text('Error loading years');
+                    }
+                    if (!snapshot.hasData) return const Text('No years found');
+                    var years = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('Year of Study', prefixIcon: const Icon(Icons.calendar_view_day_outlined)),
+                      value: _selectedYearId,
+                      items: years.map((year) {
+                        final data = year.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(value: year.id, child: Text(data['name'].toUpperCase()));
+                      }).toList(),
+                      onChanged: (String? newValue) { setState(() { _selectedYearId = newValue; }); },
+                      validator: (value) => value == null ? 'Year of study is required' : null,
+                      isExpanded: true,
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getSemesters(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return const Text('Error loading semesters');
+                    }
+                    if (!snapshot.hasData) return const Text('No semesters found');
+                    var semesters = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('Semester', prefixIcon: const Icon(Icons.filter_list_alt)),
+                      value: _selectedSemesterId,
+                      items: semesters.map((semester) {
+                        final data = semester.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(value: semester.id, child: Text(data['name'].toUpperCase()));
+                      }).toList(),
+                      onChanged: (String? newValue) { setState(() { _selectedSemesterId = newValue; }); },
+                      validator: (value) => value == null ? 'Semester is required' : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 // --- End Dropdowns ---
@@ -457,30 +588,62 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                  // --- End Date/Time Pickers ---
 
                 // --- Venue Dropdown ---
-                DropdownButtonFormField<String>(
-                  decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
-                  value: _selectedVenue,
-                  items: venuesList.map((String value) => DropdownMenuItem<String>(value: value, child: Text(value))).toList(),
-                  onChanged: (val) => setState(() => _selectedVenue = val),
-                  validator: (value) => value == null ? 'Venue is required' : null,
-                  isExpanded: true,
+                StreamBuilder<QuerySnapshot>(
+                  stream: _adminService.getVenues(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return const Text('Error loading venues');
+                    }
+                    if (!snapshot.hasData) return const Text('No venues found');
+                    var venues = snapshot.data!.docs;
+                    return DropdownButtonFormField<String>(
+                      decoration: _inputDecoration('Venue', prefixIcon: const Icon(Icons.location_on_outlined)),
+                      value: _selectedVenueId,
+                      items: venues.map((venue) {
+                        final data = venue.data() as Map<String, dynamic>;
+                        // The value is the ID, the child is the Text widget with the name
+                        return DropdownMenuItem<String>(value: venue.id, child: Text((data['name'] ?? '')));
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedVenueId = val;
+                        // Find the name corresponding to the selected ID
+                        final selectedDoc = venues.firstWhere(
+                          (doc) => doc.id == val,
+                        );
+                        // If a doc is found, This correctly hides the online link field when a non-ONLINE venue is selected.
+                        _selectedVenueName = selectedDoc.data() is Map<String, dynamic>
+                            ? (selectedDoc.data() as Map<String, dynamic>)['name']
+                            : null;
+                        });
+                      },
+                      validator: (value) => value == null ? 'Venue is required' : null,
+                      isExpanded: true,
+                    );
+                  },
                 ),
                 // --- END Venue Dropdown ---
 
                 // --- Conditional Online Link Field ---
-                if (_selectedVenue == 'ONLINE') ...[
+                if (_selectedVenueName?.toUpperCase() == 'ONLINE') ...[
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _onlineLinkController,
                     decoration: _inputDecoration(
                       'Online Lecture Link',
                       prefixIcon: const Icon(Icons.link_outlined),
-                      isRequired: true, // Required only when venue is ONLINE
+                      isRequired: true,
                       hint: 'e.g., https://meet.google.com/abc-xyz'
                     ),
                     keyboardType: TextInputType.url,
                     validator: (value) {
-                      if (_selectedVenue == 'ONLINE') {
+                      // This validation runs only when the field is visible.
+                      // The visibility is controlled by `_selectedVenueId == 'ONLINE'`.
+                      // So, we can safely assume the link is required here when the name is ONLINE.
+                      if (_selectedVenueName?.toUpperCase() == 'ONLINE') {
                         if (value == null || value.trim().isEmpty) {
                           return 'Online link is required for ONLINE venue';
                         }

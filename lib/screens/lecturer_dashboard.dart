@@ -1,13 +1,17 @@
 // lib/screens/lecturer_dashboard.dart
 import 'dart:async'; // Import for TimeoutException
+export 'lecturer_dashboard.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:checkmate/models/attendance_record.dart';
+import 'package:checkmate/services/admin_service.dart';
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/screens/lecture_attendance_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:checkmate/services/api_service.dart'; // Import ApiException
 import 'package:checkmate/widgets/create_lecture_dialog.dart';
 import 'package:checkmate/widgets/edit_lecture_dialog.dart';
+import 'package:checkmate/widgets/document_name_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/screens/welcome_screen.dart';
@@ -38,8 +42,9 @@ class LecturerDashboard extends StatefulWidget {
 }
 class _LecturerDashboardState extends State<LecturerDashboard> {
   final ApiService apiService = ApiService();
-  Future<List<Lecture>>? _lecturesFetchFuture; // Future for the API call
-  List<Lecture> _allLectures = []; // Stores all fetched lectures
+  final AdminService _adminService = AdminService();
+  Stream<List<Lecture>>? _lecturesStream; // Stream for the API call
+  List<Lecture> _allLectures = []; // Stores the latest lectures from the stream
   List<Lecture> _displayedLectures = []; // Stores lectures to be displayed (filtered)
 
   // --- Filter State ---
@@ -59,31 +64,18 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   }
 
   // Fetches lectures created by the current lecturer
-  void loadLectures() {
+ void loadLectures() {
     if (!mounted) return;
     if (kDebugMode) print("Fetching lectures for lecturer ID: ${widget.currentUser.id}");
     setState(() {
-      // Assign the future for the FutureBuilder
-      _lecturesFetchFuture = apiService.getLecturesForLecturer(widget.currentUser.id)
-          .then((fetchedLectures) {
-            // Once fetched, store in _allLectures and apply filters
-            if (mounted) {
-              _allLectures = fetchedLectures;
-              _applyFilters(); // Apply initial filters (none by default)
-            }
-            return _allLectures; // Return the full list for the FutureBuilder snapshot
-          })
-          .catchError((error) {
-            // Handle fetch error within the future chain if needed,
-            // or let the FutureBuilder handle it.
-             if (mounted) {
-                // Clear lists on error
-                _allLectures = [];
-                _displayedLectures = [];
-             }
-             // Re-throw the error so FutureBuilder catches it
-             throw error;
-          });
+      // Transform the Stream<QuerySnapshot> into a Stream<List<Lecture>>
+      _lecturesStream = FirebaseFirestore.instance
+          .collection('lectures')
+          .where('lecturerId', isEqualTo: widget.currentUser.id)
+          .snapshots() // This returns a Stream<QuerySnapshot>
+          .map((snapshot) => snapshot.docs // This maps the stream to what the UI expects
+              .map((doc) => Lecture.fromFirestore(doc))
+              .toList());
     });
   }
 
@@ -184,6 +176,21 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   }
   // --- End Filtering Logic ---
 
+  // Helper to show a user-friendly error dialog
+  void _showErrorDialog(String title, String content) {
+    if (!mounted) return;
+    showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            title: Row(children: [ Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error), const SizedBox(width: 10), Text(title), ]),
+            content: Text(content),
+            actions: <Widget>[ TextButton(child: const Text('OK'), onPressed: () => Navigator.of(dialogContext).pop()), ],
+          );
+        });
+  }
+
 
   // Helper to show snackbar messages
   void showSnackBar(String message, {bool isError = false}) {
@@ -218,11 +225,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   /// Performs the actual check-in API call and handles responses.
   Future<bool> _performCheckIn(String registrationNumber, Lecture lecture, BuildContext currentContext) async {
     if (!allowedRegNumChars.hasMatch(registrationNumber)) {
-       if (currentContext.mounted) {
-          ScaffoldMessenger.of(currentContext).showSnackBar(
-             SnackBar(content: Text('Invalid registration number format: $registrationNumber'), backgroundColor: Colors.red)
-          );
-       }
+       _showErrorDialog('Check-in Failed', 'Invalid registration number format: $registrationNumber');
        return false;
     }
 
@@ -232,9 +235,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
         registrationNumber,
       );
       if (!currentContext.mounted) return false;
-      ScaffoldMessenger.of(currentContext).showSnackBar(
-         SnackBar(content: Text('Student ${checkedInRecord.studentName} (${checkedInRecord.registrationNumber}) checked in!'), backgroundColor: Colors.green.shade600)
-      );
+      showSnackBar('Student ${checkedInRecord.studentName} (${checkedInRecord.registrationNumber}) checked in!', isError: false);
       return true;
 
     } catch (e) {
@@ -255,9 +256,10 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
          errorMessage = 'Check-in failed: ${e.toString().replaceFirst("Exception: ", "")}';
          if (kDebugMode) print("Generic Check-In Error: $e");
        }
-       ScaffoldMessenger.of(currentContext).showSnackBar(
-          SnackBar(content: Text(errorMessage), backgroundColor: Colors.red)
-       );
+       // Use the main screen's error dialog for consistency
+       if (mounted) {
+         _showErrorDialog('Check-in Failed', errorMessage);
+       }
        return false;
     }
   }
@@ -293,9 +295,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                 onSubmitted: (_) async {
                    if (isCheckingIn) return;
                    final registrationNumber = registrationNumberController.text.trim();
-                   if (registrationNumber.isEmpty) {
-                      ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(content: Text('Please enter a registration number.'), backgroundColor: Colors.red)); return;
-                   }
+                   if (registrationNumber.isEmpty) { return; }
                    setDialogState(() => isCheckingIn = true);
                    bool success = await _performCheckIn(registrationNumber, lecture, dialogContext);
                    if (success && dialogContext.mounted) { Navigator.of(dialogContext).pop(); }
@@ -308,9 +308,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                 ElevatedButton(
                   onPressed: isCheckingIn ? null : () async {
                     final registrationNumber = registrationNumberController.text.trim();
-                    if (registrationNumber.isEmpty) {
-                      ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(content: Text('Please enter a registration number.'), backgroundColor: Colors.red)); return;
-                    }
+                    if (registrationNumber.isEmpty) { return; }
                     setDialogState(() => isCheckingIn = true);
                     bool success = await _performCheckIn(registrationNumber, lecture, dialogContext);
                     if (success && dialogContext.mounted) { Navigator.of(dialogContext).pop(); }
@@ -485,9 +483,35 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
             child: RefreshIndicator(
               color: brandColor,
               onRefresh: () async => loadLectures(),
-              child: FutureBuilder<List<Lecture>>(
-                future: _lecturesFetchFuture, // Use the fetch future
+              child: StreamBuilder<List<Lecture>>(
+                stream: _lecturesStream,
                 builder: (context, snapshot) {
+                  // Handle stream data
+                  if (snapshot.hasData) {
+                    _allLectures = snapshot.data ?? [];
+                  }
+
+                  // --- Perform Filtering Here (instead of calling _applyFilters) ---
+                  List<Lecture> currentlyDisplayed = List.from(_allLectures);
+                  if (_filterStartDate != null || _filterEndDate != null) {
+                    currentlyDisplayed = currentlyDisplayed.where((lecture) {
+                      final lectureDate = lecture.startTime?.toLocal();
+                      if (lectureDate == null) return false;
+                      final lectureDay = DateTime(lectureDate.year, lectureDate.month, lectureDate.day);
+                      final filterStartDay = _filterStartDate != null ? DateTime(_filterStartDate!.year, _filterStartDate!.month, _filterStartDate!.day) : null;
+                      final filterEndDay = _filterEndDate != null ? DateTime(_filterEndDate!.year, _filterEndDate!.month, _filterEndDate!.day) : null;
+                      bool afterStartDate = filterStartDay == null || !lectureDay.isBefore(filterStartDay);
+                      bool beforeEndDate = filterEndDay == null || !lectureDay.isAfter(filterEndDay);
+                      return afterStartDate && beforeEndDate;
+                    }).toList();
+                  }
+                  currentlyDisplayed.sort((a, b) {
+                    final aTime = a.startTime; final bTime = b.startTime;
+                    if (aTime != null && bTime != null) return bTime.compareTo(aTime);
+                    return (aTime == null) ? 1 : -1;
+                  });
+                  // --- End Filtering ---
+
                   // --- Loading State ---
                   if (snapshot.connectionState == ConnectionState.waiting && _allLectures.isEmpty) {
                      // Show loading only on initial load or if _allLectures is empty
@@ -528,8 +552,8 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   }
 
                   // --- Empty or Filtered Empty State ---
-                  // Use _displayedLectures here for the condition
-                  if (_displayedLectures.isEmpty) {
+                  // Use the locally filtered list for the condition
+                  if (currentlyDisplayed.isEmpty) {
                     return LayoutBuilder(
                        builder: (context, constraints) {
                         return SingleChildScrollView(
@@ -567,26 +591,54 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   }
 
                   // --- Success State - Display Lectures ---
-                  // Use _displayedLectures for the ListView
+                  // Use the locally filtered list for the ListView
                   return ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
-                    itemCount: _displayedLectures.length, // Use filtered list
-                    itemBuilder: (context, index) {
-                      final lecture = _displayedLectures[index]; // Use filtered list
-                      final yearSemesterText = [lecture.yearOfStudy, lecture.semester]
-                          .where((s) => s.isNotEmpty)
-                          .join(' | ');
-                      final courseText = lecture.course ?? 'N/A';
+                    itemCount: currentlyDisplayed.length, // Use filtered list
+                    itemBuilder: (context, index) { // Start of itemBuilder
+                      final lecture = currentlyDisplayed[index]; // Use filtered list
                       final dateTimeText = '${lecture.formattedDate} | ${lecture.formattedStartTime} - ${lecture.formattedEndTime}';
-                      final venueText = 'Venue: ${lecture.venue}';
-                      final onlineLinkText = (lecture.venue.toUpperCase() == 'ONLINE' && lecture.onlineLink != null && lecture.onlineLink!.isNotEmpty)
-                          ? 'Link: ${lecture.onlineLink}'
-                          : null;
-                      final subtitleParts = [courseText, yearSemesterText, dateTimeText, venueText];
-                      if (onlineLinkText != null) { subtitleParts.add(onlineLinkText); }
-                      final subtitleText = subtitleParts.where((part) => part.isNotEmpty).join('\n');
-
+                      
+                      // Build the subtitle dynamically with DocumentNameWidget
+                      final subtitleWidgets = <Widget>[
+                        DocumentNameWidget(collection: 'courses', documentId: lecture.course, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                        Row(
+                          children: [
+                            DocumentNameWidget(collection: 'years_of_study', documentId: lecture.yearOfStudy, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                            Text(' | ', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)), // Separator
+                            DocumentNameWidget(collection: 'semesters', documentId: lecture.semester, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                          ],
+                        ),
+                        Text(dateTimeText, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                        Row(
+                          children: [
+                            Text('Venue: ', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                            // Use DocumentNameWidget to check the venue name
+                            DocumentNameWidget(
+                              collection: 'venues', documentId: lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3),
+                              builder: (context, venueName) {
+                                // Conditionally show the online link based on the fetched venue name
+                                if (venueName?.toUpperCase() == 'ONLINE' && lecture.onlineLink != null && lecture.onlineLink!.isNotEmpty) {
+                                  return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(venueName ?? lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                                      Text(
+                                        'Link: ${lecture.onlineLink}',
+                                        style: textTheme.bodySmall?.copyWith(color: Colors.blue.shade700, height: 1.3),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  );
+                                }
+                                // Otherwise, just show the venue name
+                                return Text(venueName ?? lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3));
+                              },
+                            ),
+                          ],
+                        ),
+                      ];
                       return Card(
                           margin: const EdgeInsets.symmetric(vertical: 6.0),
                           elevation: 1.5,
@@ -607,8 +659,11 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text( '${lecture.unitName} (${lecture.unitCode})', style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600), ),
-                                        const SizedBox(height: 4),
-                                        Text( subtitleText, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3), ),
+                                        const SizedBox(height: 6),
+                                        ...subtitleWidgets.map((widget) => Padding(
+                                          padding: const EdgeInsets.only(top: 1.0),
+                                          child: widget,
+                                        )).toList(),
                                       ],
                                     ),
                                   ),
@@ -643,7 +698,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                             ),
                           ),
                       );
-                    },
+                    }, // End of itemBuilder
                   );
                 },
               ),
