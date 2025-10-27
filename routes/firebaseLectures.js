@@ -524,6 +524,81 @@ router.get('/student', checkAuth, async (req, res) => {
       }
 });
 
+// --- Get lectures for a student's dashboard (based on their attendance records) ---
+router.get('/student/dashboard/:studentId', checkAuth, async (req, res) => {
+    const requestedStudentId = req.params.studentId;
+    const authUserId = req.userData.userId;
+    const authUserEmail = req.userData.email;
+
+    console.log(`[GET /student/dashboard/${requestedStudentId}] Request received from user ${authUserEmail} (ID: ${authUserId})`);
+
+    // Authorization: Ensure the authenticated user is requesting their own data
+    if (requestedStudentId !== authUserId) {
+        console.warn(`[GET /student/dashboard/${requestedStudentId}] Forbidden attempt: User ${authUserId} tried to access dashboard for ${requestedStudentId}`);
+        return res.status(403).json({ error: 'Forbidden: You can only access your own lecture dashboard.' });
+    }
+
+    try {
+        // 1. Find all attendance records for the student
+        console.log(`[GET /student/dashboard/${requestedStudentId}] Querying attendance records for user ID: ${requestedStudentId}`);
+        const attendanceQuery = db.collection(ATTENDANCE_COLLECTION).where('userId', '==', requestedStudentId);
+        const attendanceSnapshot = await attendanceQuery.get();
+
+        if (attendanceSnapshot.empty) {
+            console.log(`[GET /student/dashboard/${requestedStudentId}] No attendance records found for this student. Returning empty list.`);
+            return res.json([]);
+        }
+
+        // 2. Extract unique lecture IDs from the attendance records
+        const lectureIds = [...new Set(attendanceSnapshot.docs.map(doc => doc.data().lectureId))];
+        console.log(`[GET /student/dashboard/${requestedStudentId}] Found ${lectureIds.length} unique lecture IDs from attendance records.`);
+
+        if (lectureIds.length === 0) {
+            return res.json([]);
+        }
+
+        // 3. Fetch all lecture documents corresponding to those IDs
+        // Firestore 'in' query is limited to 30 items per query.
+        // We need to chunk the requests if there are more than 30 lecture IDs.
+        const lecturePromises = [];
+        for (let i = 0; i < lectureIds.length; i += 30) {
+            const chunk = lectureIds.slice(i, i + 30);
+            console.log(`[GET /student/dashboard/${requestedStudentId}] Fetching chunk of ${chunk.length} lectures...`);
+            lecturePromises.push(
+                db.collection(LECTURES_COLLECTION).where(admin.firestore.FieldPath.documentId(), 'in', chunk).get()
+            );
+        }
+
+        const lectureSnapshots = await Promise.all(lecturePromises);
+
+        const lectures = [];
+        lectureSnapshots.forEach(snapshot => {
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                lectures.push({
+                    id: doc.id,
+                    ...data,
+                    lectureDate: formatTimestampForClient(data.lectureDate),
+                    startTime: formatTimestampForClient(data.startTime),
+                    endTime: formatTimestampForClient(data.endTime),
+                    createdAt: formatTimestampForClient(data.createdAt),
+                });
+            });
+        });
+
+        console.log(`[GET /student/dashboard/${requestedStudentId}] Successfully fetched ${lectures.length} lectures. Sending response.`);
+        res.json(lectures);
+
+    } catch (error) {
+        console.error(`[GET /student/dashboard/${requestedStudentId}] Error getting student dashboard lectures:`, error);
+        console.error(`[GET /student/dashboard/${requestedStudentId}] Error Stack:`, error.stack);
+        res.status(500).json({
+            error: 'Internal Server Error: Failed to get student dashboard lectures',
+            details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+        });
+    }
+});
+
 
 // --- Get all lectures (Admin Only) ---
 router.get('/', checkAuth, async (req, res) => {

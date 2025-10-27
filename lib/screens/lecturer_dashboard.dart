@@ -2,9 +2,7 @@
 import 'dart:async'; // Import for TimeoutException
 export 'lecturer_dashboard.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
 import 'package:checkmate/models/attendance_record.dart';
-import 'package:checkmate/services/admin_service.dart';
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/screens/lecture_attendance_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
@@ -42,10 +40,8 @@ class LecturerDashboard extends StatefulWidget {
 }
 class _LecturerDashboardState extends State<LecturerDashboard> {
   final ApiService apiService = ApiService();
-  final AdminService _adminService = AdminService();
   Stream<List<Lecture>>? _lecturesStream; // Stream for the API call
   List<Lecture> _allLectures = []; // Stores the latest lectures from the stream
-  List<Lecture> _displayedLectures = []; // Stores lectures to be displayed (filtered)
 
   // --- Filter State ---
   DateTime? _filterStartDate;
@@ -53,6 +49,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   // --- End Filter State ---
 
   bool _isCheckingInViaQr = false; // Flag to prevent concurrent QR check-in actions
+  String? _deletingLectureId; // New flag to track which lecture is being deleted
 
   static const Color brandColor = Color(0xFF0175C2);
   final RegExp allowedRegNumChars = RegExp(r'^[A-Z0-9/-]+$');
@@ -77,55 +74,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
               .map((doc) => Lecture.fromFirestore(doc))
               .toList());
     });
-  }
-
-  // --- Filtering Logic ---
-  void _applyFilters() {
-    if (!mounted) return;
-
-    List<Lecture> filtered = List.from(_allLectures); // Start with all lectures
-
-    if (_filterStartDate != null || _filterEndDate != null) {
-      filtered = filtered.where((lecture) {
-        final lectureDate = lecture.startTime?.toLocal(); // Use startTime for comparison
-        if (lectureDate == null) return false; // Exclude lectures without a start time
-
-        // Normalize dates to compare only Year, Month, Day
-        final lectureDay = DateTime(lectureDate.year, lectureDate.month, lectureDate.day);
-        final filterStartDay = _filterStartDate != null
-            ? DateTime(_filterStartDate!.year, _filterStartDate!.month, _filterStartDate!.day)
-            : null;
-        final filterEndDay = _filterEndDate != null
-            ? DateTime(_filterEndDate!.year, _filterEndDate!.month, _filterEndDate!.day)
-            : null;
-
-        bool afterStartDate = filterStartDay == null || !lectureDay.isBefore(filterStartDay);
-        bool beforeEndDate = filterEndDay == null || !lectureDay.isAfter(filterEndDay);
-
-        return afterStartDate && beforeEndDate;
-      }).toList();
-    }
-
-    // --- SORTING LOGIC: Latest first ---
-    // Apply sorting AFTER filtering. Sort by startTime descending (latest first).
-    filtered.sort((a, b) {
-       final aTime = a.startTime;
-       final bTime = b.startTime;
-       if (aTime != null && bTime != null) {
-         // Sort descending by startTime (latest first)
-         return bTime.compareTo(aTime);
-       }
-       // Keep null handling: nulls go last
-       else if (aTime == null && bTime != null) { return 1; }
-       else if (aTime != null && bTime == null) { return -1; }
-       else { return 0; } // Both null
-    });
-    // --- END SORTING LOGIC ---
-
-    setState(() {
-      _displayedLectures = filtered;
-    });
-     if (kDebugMode) print("Filters applied. Displaying ${_displayedLectures.length} out of ${_allLectures.length} lectures. Sorted latest first.");
   }
 
   Future<void> _showDateFilterDialog() async {
@@ -163,7 +111,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
         _filterStartDate = picked.start;
         _filterEndDate = picked.end;
       });
-      _applyFilters();
     }
   }
 
@@ -172,7 +119,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
       _filterStartDate = null;
       _filterEndDate = null;
     });
-    _applyFilters();
   }
   // --- End Filtering Logic ---
 
@@ -208,7 +154,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   // Shows the dialog to create a new lecture
   void showCreateLectureDialog() async {
-    if (_isCheckingInViaQr) return;
+    if (_isCheckingInViaQr || _deletingLectureId != null) return; // Disable if other actions are processing
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -217,7 +163,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
       },
     );
     if (result == true && mounted) {
-      loadLectures(); // Reload all lectures
+      // Stream will auto-update, just show snackbar
       showSnackBar('Lecture created successfully!', isError: false);
     }
   }
@@ -225,7 +171,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
   /// Performs the actual check-in API call and handles responses.
   Future<bool> _performCheckIn(String registrationNumber, Lecture lecture, BuildContext currentContext) async {
     if (!allowedRegNumChars.hasMatch(registrationNumber)) {
-       _showErrorDialog('Check-in Failed', 'Invalid registration number format: $registrationNumber');
+       _showErrorDialog('Check-in Failed', 'Invalid registration number format: ');
        return false;
     }
 
@@ -245,7 +191,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
          if (e.statusCode == 400 || e.statusCode == 404) {
            errorMessage = e.message.contains("join")
                ? 'Check-in failed: Student has not joined this lecture yet.'
-               : 'Check-in failed: Student ($registrationNumber) not found or invalid request.';
+               : 'Check-in failed: Student () not found or invalid request.';
          } else if (e.statusCode == 409) {
            errorMessage = 'Check-in failed: Student is already checked in.';
          } else {
@@ -254,7 +200,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
          if (kDebugMode) print("API Check-In Error (${e.statusCode}): ${e.message}");
        } else {
          errorMessage = 'Check-in failed: ${e.toString().replaceFirst("Exception: ", "")}';
-         if (kDebugMode) print("Generic Check-In Error: $e");
+         if (kDebugMode) print("Generic Check-In Error: ");
        }
        // Use the main screen's error dialog for consistency
        if (mounted) {
@@ -266,7 +212,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   // Shows the dialog for manual student check-in via registration number
   void showCheckInDialog(Lecture lecture) {
-    if (_isCheckingInViaQr) return;
+    if (_isCheckingInViaQr || _deletingLectureId != null) return; // Disable if other actions are processing
     final registrationNumberController = TextEditingController();
     bool isCheckingIn = false;
 
@@ -286,7 +232,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   prefixIcon: Icon(Icons.badge_outlined, color: brandColor.withOpacity(0.7)),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade400)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: brandColor, width: 1.5)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: brandColor, width: 1.5)),
                   filled: true, fillColor: Colors.grey[50],
                 ),
                 inputFormatters: [ UpperCaseTextFormatter(), FilteringTextInputFormatter.allow(allowedRegNumChars), ],
@@ -327,13 +273,13 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   // Handles scanning a student's QR code for check-in
   Future<void> _scanQrCodeAndCheckIn(Lecture lecture) async {
-    if (!mounted || _isCheckingInViaQr) return;
+    if (!mounted || _isCheckingInViaQr || _deletingLectureId != null) return; // Disable if other actions are processing
 
     final String? scannedRegNum = await Navigator.push<String>( context, MaterialPageRoute(builder: (context) => const QrScannerScreen()), );
     if (!mounted) return;
 
     if (scannedRegNum != null && scannedRegNum.isNotEmpty) {
-      if (kDebugMode) print("Scanned Registration Number: $scannedRegNum");
+      if (kDebugMode) print("Scanned Registration Number: ");
       final String processedRegNum = scannedRegNum.trim().toUpperCase();
 
       setState(() { _isCheckingInViaQr = true; });
@@ -346,7 +292,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
 
   // Shows the dialog to edit an existing lecture
   Future<void> _showEditLectureDialog(Lecture lecture) async {
-    if (_isCheckingInViaQr) return;
+    if (_isCheckingInViaQr || _deletingLectureId != null) return;
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -356,7 +302,70 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     );
     if (result == true && mounted) {
       showSnackBar('Lecture "${lecture.unitName}" updated successfully.', isError: false);
-      loadLectures(); // Reload all lectures
+      // Stream will auto-update
+    }
+  }
+
+  // --- New: Confirm and Delete Lecture ---
+  Future<void> _confirmAndDeleteLecture(Lecture lecture) async {
+    if (_isCheckingInViaQr || _deletingLectureId != null) return; // Prevent multiple actions
+
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          title: const Text('Confirm Deletion'),
+          content: Text('Are you sure you want to delete the lecture "${lecture.unitName}" (${lecture.unitCode})?\nThis action cannot be undone and will also delete all associated attendance records.'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true && mounted) {
+      await _deleteLecture(lecture);
+    }
+  }
+
+  // --- New: Delete Lecture ---
+  Future<void> _deleteLecture(Lecture lecture) async {
+    if (!mounted) return;
+    setState(() {
+      _deletingLectureId = lecture.id; // Set the ID of the lecture being deleted
+    });
+
+    try {
+      await apiService.deleteLecture(lecture.id);
+      if (!mounted) return;
+      showSnackBar('Lecture "${lecture.unitName}" deleted successfully.', isError: false);
+      // The stream will update the list automatically.
+    } catch (e) {
+      if (!mounted) return;
+      String errorMessage = 'Failed to delete lecture.';
+      if (e is ApiException) {
+        errorMessage += ' ${e.message}';
+        if (kDebugMode) print("API Delete Error: ${e.statusCode} - ${e.message}");
+      } else {
+        errorMessage += ' Please try again.';
+        if (kDebugMode) print("Generic Delete Error: ");
+      }
+      _showErrorDialog('Deletion Failed', errorMessage);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingLectureId = null; // Clear the deleting ID
+        });
+      }
     }
   }
 
@@ -371,6 +380,9 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     final textTheme = Theme.of(context).textTheme;
     final DateFormat filterDateFormat = DateFormat.yMMMd(); // Format for displaying filter dates
 
+    // Determine if any action is currently processing to disable buttons
+    final bool isAnyActionProcessing = _isCheckingInViaQr || _deletingLectureId != null;
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Lecturer Dashboard - ${widget.currentUser.name}', style: const TextStyle(fontSize: 18)),
@@ -378,7 +390,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
         foregroundColor: Colors.white,
         elevation: 2.0,
         actions: [
-          if (_isCheckingInViaQr)
+          if (isAnyActionProcessing) // Show global loading indicator if any action is processing
              const Padding(
                padding: EdgeInsets.only(right: 15.0),
                child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))),
@@ -387,18 +399,18 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
           IconButton(
             icon: Icon(Icons.filter_list, color: (_filterStartDate != null || _filterEndDate != null) ? Colors.amberAccent : Colors.white),
             tooltip: 'Filter by Date',
-            onPressed: _isCheckingInViaQr ? null : _showDateFilterDialog,
+            onPressed: isAnyActionProcessing ? null : _showDateFilterDialog, // Disable if any action is processing
           ),
           // --- End Filter Button ---
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh Lectures',
-            onPressed: _isCheckingInViaQr ? null : loadLectures,
+            onPressed: isAnyActionProcessing ? null : loadLectures, // Disable if any action is processing
           ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Logout',
-            onPressed: _isCheckingInViaQr ? null : () async {
+            onPressed: isAnyActionProcessing ? null : () async { // Disable if any action is processing
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (context) => AlertDialog(
@@ -434,7 +446,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.add_circle_outline),
               label: const Text('Create New Lecture'),
-              onPressed: _isCheckingInViaQr ? null : showCreateLectureDialog,
+              onPressed: isAnyActionProcessing ? null : showCreateLectureDialog, // Disable if any action is processing
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 52), backgroundColor: brandColor, foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -458,7 +470,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   Chip(
                     label: Text(
                       'Filtered: ${ _filterStartDate != null ? filterDateFormat.format(_filterStartDate!) : 'Start'} - ${ _filterEndDate != null ? filterDateFormat.format(_filterEndDate!) : 'End'}',
-                      style: TextStyle(fontSize: 12, color: brandColor),
+                      style: const TextStyle(fontSize: 12, color: brandColor),
                     ),
                     backgroundColor: brandColor.withOpacity(0.1),
                     side: BorderSide.none,
@@ -491,7 +503,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                     _allLectures = snapshot.data ?? [];
                   }
 
-                  // --- Perform Filtering Here (instead of calling _applyFilters) ---
+                  // --- Perform Filtering Here ---
                   List<Lecture> currentlyDisplayed = List.from(_allLectures);
                   if (_filterStartDate != null || _filterEndDate != null) {
                     currentlyDisplayed = currentlyDisplayed.where((lecture) {
@@ -515,7 +527,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   // --- Loading State ---
                   if (snapshot.connectionState == ConnectionState.waiting && _allLectures.isEmpty) {
                      // Show loading only on initial load or if _allLectures is empty
-                    return Center(child: CircularProgressIndicator(color: brandColor));
+                    return const Center(child: CircularProgressIndicator(color: brandColor));
                   }
                   // --- Error State ---
                   if (snapshot.hasError && _allLectures.isEmpty) { // Show error only if no data was previously loaded
@@ -524,7 +536,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                     if (error is ApiException) { displayMessage = error.message; }
                     else if (error is TimeoutException) { displayMessage = 'Request timed out.'; }
                     else { displayMessage = 'An unexpected error occurred.'; }
-                    if (kDebugMode) print("Error fetching lectures Future: $error");
+                    if (kDebugMode) print("Error fetching lectures Future: ");
                     return Center(
                        child: Padding(
                         padding: const EdgeInsets.all(16.0),
@@ -533,7 +545,11 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                           children: [
                             Icon(Icons.error_outline, color: Colors.red.shade400, size: 48),
                             const SizedBox(height: 10),
-                            Text( '$displayMessage\nPlease check connection.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700), ),
+                            Text(
+                              '\n$displayMessage\n\nPlease check connection.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.grey.shade700),
+                            ),
                             const SizedBox(height: 15),
                             ElevatedButton.icon(
                               icon: const Icon(Icons.refresh), label: const Text('Retry'),
@@ -543,7 +559,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                             if (kDebugMode)
                               Padding(
                                 padding: const EdgeInsets.only(top: 8.0),
-                                child: Text('\nDetails: $error', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                                child: Text('\nDetails: ${error?.toString() ?? 'No details available.'}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
                               ),
                           ],
                         ),
@@ -552,7 +568,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   }
 
                   // --- Empty or Filtered Empty State ---
-                  // Use the locally filtered list for the condition
                   if (currentlyDisplayed.isEmpty) {
                     return LayoutBuilder(
                        builder: (context, constraints) {
@@ -591,7 +606,6 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                   }
 
                   // --- Success State - Display Lectures ---
-                  // Use the locally filtered list for the ListView
                   return ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
@@ -620,16 +634,18 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                               builder: (context, venueName) {
                                 // Conditionally show the online link based on the fetched venue name
                                 if (venueName?.toUpperCase() == 'ONLINE' && lecture.onlineLink != null && lecture.onlineLink!.isNotEmpty) {
-                                  return Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(venueName ?? lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
-                                      Text(
-                                        'Link: ${lecture.onlineLink}',
-                                        style: textTheme.bodySmall?.copyWith(color: Colors.blue.shade700, height: 1.3),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
+                                  return Flexible(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(venueName ?? lecture.venue, style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade700, height: 1.3)),
+                                        Text(
+                                          'Link: ${lecture.onlineLink}',
+                                          style: textTheme.bodySmall?.copyWith(color: Colors.blue.shade700, height: 1.3),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
                                   );
                                 }
                                 // Otherwise, just show the venue name
@@ -645,14 +661,14 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(10),
-                            onTap: _isCheckingInViaQr ? null : () {
+                            onTap: isAnyActionProcessing ? null : () { // Disable if any action is processing
                                Navigator.push( context, MaterialPageRoute( builder: (context) => LectureAttendanceScreen(lecture: lecture), ), );
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 16.0),
                               child: Row(
                                 children: [
-                                  CircleAvatar( backgroundColor: brandColor.withOpacity(0.1), child: Icon(Icons.school_outlined, size: 22, color: brandColor), ),
+                                  const CircleAvatar( backgroundColor: brandColor, child: Icon(Icons.school_outlined, size: 22, color: Colors.white), ),
                                   const SizedBox(width: 16),
                                   Expanded(
                                     child: Column(
@@ -673,22 +689,39 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                                         children: [
                                           ElevatedButton.icon(
                                             icon: const Icon(Icons.person_add_alt_1_outlined, size: 18), label: const Text('Check-In'),
-                                            onPressed: _isCheckingInViaQr ? null : () => showCheckInDialog(lecture),
+                                            onPressed: isAnyActionProcessing ? null : () => showCheckInDialog(lecture), // Disable if any action is processing
                                             style: ElevatedButton.styleFrom( backgroundColor: brandColor.withOpacity(0.15), foregroundColor: brandColor, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), ),
                                           ),
                                           const SizedBox(height: 4),
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
+                                              // QR Scan Button
                                               IconButton(
-                                                icon: const Icon(Icons.qr_code_scanner), tooltip: 'Scan Student QR Code', color: brandColor.withOpacity(0.8), iconSize: 26, visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, constraints: BoxConstraints(),
-                                                onPressed: _isCheckingInViaQr ? null : () => _scanQrCodeAndCheckIn(lecture),
+                                                icon: const Icon(Icons.qr_code_scanner), tooltip: 'Scan Student QR Code', color: brandColor.withOpacity(0.8), iconSize: 26, visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                                onPressed: isAnyActionProcessing ? null : () => _scanQrCodeAndCheckIn(lecture), // Disable if any action is processing
                                               ),
-                                              const SizedBox(width: 4),
+                                              // Edit Button
                                               IconButton(
-                                                icon: const Icon(Icons.edit_outlined), tooltip: 'Edit Lecture', color: brandColor.withOpacity(0.9), iconSize: 26, visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, constraints: BoxConstraints(),
-                                                onPressed: _isCheckingInViaQr ? null : () => _showEditLectureDialog(lecture),
+                                                icon: const Icon(Icons.edit_outlined), tooltip: 'Edit Lecture', color: brandColor.withOpacity(0.9), iconSize: 26, visualDensity: VisualDensity.compact, padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                                                onPressed: isAnyActionProcessing ? null : () => _showEditLectureDialog(lecture), // Disable if any action is processing
                                               ),
+                                              // --- New: Delete Button ---
+                                              IconButton(
+                                                icon: _deletingLectureId == lecture.id
+                                                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red))
+                                                    : const Icon(Icons.delete_outline),
+                                                tooltip: 'Delete Lecture',
+                                                color: Colors.red.shade700,
+                                                iconSize: 26,
+                                                visualDensity: VisualDensity.compact,
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints(),
+                                                onPressed: _deletingLectureId == lecture.id || isAnyActionProcessing
+                                                    ? null
+                                                    : () => _confirmAndDeleteLecture(lecture),
+                                              ),
+                                              // --- End New: Delete Button ---
                                             ],
                                           ),
                                         ],

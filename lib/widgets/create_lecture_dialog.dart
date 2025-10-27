@@ -3,7 +3,7 @@ import 'package:checkmate/models/app_user.dart' as app_user;
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/services/admin_service.dart';
-import 'package:checkmate/widgets/document_name_widget.dart';
+// import 'package:checkmate/widgets/document_name_widget.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // Import kDebugMode
 import 'package:flutter/material.dart';
@@ -280,19 +280,6 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
     }
   }
 
-  void _showValidationError(String message) {
-     // ... (snackbar code remains the same) ...
-     if (!mounted) return;
-     ScaffoldMessenger.of(context).showSnackBar(
-       SnackBar(
-         content: Text(message),
-         backgroundColor: Theme.of(context).colorScheme.error,
-         behavior: SnackBarBehavior.floating,
-         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-         margin: const EdgeInsets.all(10),
-       ),
-     );
-  }
 
   void _showErrorDialog(String title, String message) {
     if (!mounted) return;

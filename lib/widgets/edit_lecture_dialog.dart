@@ -1,8 +1,8 @@
-import 'dart:convert'; // Import for jsonEncode
+// import 'dart:convert'; // Import for jsonEncode
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/admin_service.dart';
 import 'package:checkmate/services/api_service.dart'; // Import ApiService
-import 'package:checkmate/widgets/document_name_widget.dart';
+// import 'package:checkmate/widgets/document_name_widget.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:flutter/material.dart';
@@ -279,7 +279,7 @@ class _EditLectureDialogState extends State<EditLectureDialog> {
       'yearOfStudy': _selectedYearId,
       'semester': _selectedSemesterId,
       // Send dates/times in ISO 8601 format with offset.
-      'lectureDate': DateFormat('yyyy-MM-dd').format(_selectedDate), 
+      'lectureDate': DateFormat('yyyy-MM-dd').format(localStartDateTime), 
       'startTime': startDateTime.toIso8601String(), 
       'endTime': endDateTime.toIso8601String(),     
       'onlineLink': onlineLinkValue,

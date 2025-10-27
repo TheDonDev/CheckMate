@@ -26,7 +26,7 @@ class StudentDashboard extends StatefulWidget {
 class _StudentDashboardState extends State<StudentDashboard> {
   final ApiService apiService = ApiService();
 
-  Future<List<Lecture>>? lecturesFuture;
+  Stream<List<Lecture>>? _lecturesStream; // Changed from Future to Stream
   String? _processingLectureId;
 
   // User profile details
@@ -143,13 +143,21 @@ class _StudentDashboardState extends State<StudentDashboard> {
   void loadLectures() {
     if (fixedSchool == null || fixedDepartment == null || fixedCourse == null || fixedYearOfStudy == null || fixedSemester == null) {
       if (kDebugMode) print("Cannot load lectures: Missing fixed user details.");
-      if (mounted) { setState(() { lecturesFuture = Future.value([]); }); } // Set to empty future
+      if (mounted) { setState(() { _lecturesStream = Stream<List<Lecture>>.value(<Lecture>[]); }); } // Set to empty stream
       return;
     }
     if (!mounted) return;
+
     setState(() {
-      lecturesFuture = apiService.getStudentLectures(
-        fixedSchool, fixedDepartment, fixedCourse, fixedYearOfStudy, fixedSemester,
+      // Use a stream to get real-time updates for lectures.
+      // This stream combines lectures the student has joined with currently available lectures.
+      _lecturesStream = apiService.getStudentLecturesStream(
+        userId: widget.currentUser.id,
+        schoolId: fixedSchool!,
+        departmentId: fixedDepartment!,
+        courseId: fixedCourse!,
+        yearId: fixedYearOfStudy!,
+        semesterId: fixedSemester!,
       );
     });
   }
@@ -441,12 +449,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
     // Frontend Time Check
     Lecture? scannedLecture;
-    if (lecturesFuture != null) {
+    if (_lecturesStream != null) {
         try {
-            final lectures = await lecturesFuture;
-            scannedLecture = lectures?.firstWhereOrNull((l) => l.id == scannedLectureId);
+            final lectures = await _lecturesStream!.first;
+            scannedLecture = lectures.firstWhereOrNull((l) => l.id == scannedLectureId);
         } catch (e) {
-            if (kDebugMode) print("Error accessing lecturesFuture cache during QR scan check: $e");
+            if (kDebugMode) print("Error accessing lectures stream during QR scan check: $e");
         }
     }
 
@@ -688,9 +696,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
             child: canPerformActions
                 ? RefreshIndicator(
                     color: brandColor,
-                    onRefresh: () async { loadLectures(); await _loadAttendanceSummary(); },
-                    child: FutureBuilder<List<Lecture>>(
-                      future: lecturesFuture,
+                    onRefresh: () async { loadLectures(); await _loadAttendanceSummary(); }, // Keep manual refresh
+                    child: StreamBuilder<List<Lecture>>( // Changed from FutureBuilder to StreamBuilder
+                      stream: _lecturesStream,
                       builder: (context, snapshot) { // *** START OF FutureBuilder builder ***
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           return Center(child: CircularProgressIndicator(color: brandColor));
@@ -772,8 +780,20 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         }
 
                         // --- Success State ---
-                        final lectures = snapshot.data!;
-                        lectures.sort((a, b) {
+                        final allLectures = snapshot.data!;
+
+                        // --- FILTERING LOGIC: Only show lectures for today ---
+                        final now = DateTime.now();
+                        final today = DateTime(now.year, now.month, now.day);
+
+                        final todaysLectures = allLectures.where((lecture) {
+                          if (lecture.lectureDate == null) return false;
+                          // Normalize lectureDate to midnight for accurate comparison
+                          final lectureDay = DateTime(lecture.lectureDate!.year, lecture.lectureDate!.month, lecture.lectureDate!.day);
+                          return lectureDay.isAtSameMomentAs(today);
+                        }).toList();
+
+                        todaysLectures.sort((a, b) {
                            final aDate = a.lectureDate; final bDate = b.lectureDate;
                            if (aDate != null && bDate != null) {
                              int dateComp = aDate.compareTo(bDate);
@@ -788,12 +808,14 @@ class _StudentDashboardState extends State<StudentDashboard> {
                              else { return 0; }
                         });
 
-                        return ListView.builder(
+                        return todaysLectures.isEmpty ? Center(
+                          child: Text('No lectures scheduled for today.', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+                        ) : ListView.builder(
                            physics: const AlwaysScrollableScrollPhysics(),
                            padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 80), // Added bottom padding for FAB
-                           itemCount: lectures.length,
+                           itemCount: todaysLectures.length,
                            itemBuilder: (context, index) {
-                              final lecture = lectures[index];
+                              final lecture = todaysLectures[index];
                               final attendanceRecord = _summaryAttendanceRecords?.firstWhereOrNull((r) => r.lectureId == lecture.id);
                               final bool isJoined = attendanceRecord != null && !attendanceRecord.checkedIn;
                               final bool isCheckedIn = attendanceRecord != null && attendanceRecord.checkedIn;
