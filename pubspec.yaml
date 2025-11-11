@@ -37,6 +37,7 @@ dependencies:
   firebase_analytics: ^11.4.5 # Or latest compatible
   provider: ^6.1.1 # Or latest compatible
   share_plus: ^11.0.0
+  flutter_lints: ^6.0.0
 
 flutter_lints: ^4.0.0 # Updated lints
 

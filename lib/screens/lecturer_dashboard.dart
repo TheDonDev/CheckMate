@@ -679,7 +679,7 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
                                         ...subtitleWidgets.map((widget) => Padding(
                                           padding: const EdgeInsets.only(top: 1.0),
                                           child: widget,
-                                        )).toList(),
+                                        )),
                                       ],
                                     ),
                                   ),

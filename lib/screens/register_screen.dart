@@ -234,13 +234,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     hint: 'E.g., JOHN DOE or PROF. JANE D. SMITH ',
                     prefixIcon: Icon(Icons.person_outline, color: brandColor.withOpacity(0.7)),
                   ),
-                  textCapitalization: TextCapitalization.words,
+                  textCapitalization: TextCapitalization.characters,
+                  inputFormatters: [
+                    UpperCaseTextFormatter(), // Automatically converts input to uppercase
+                  ],
                   validator: (value) {
                     // --- Name Validation Logic  ---
                     if (value == null || value.trim().isEmpty) {
                       return 'Please enter your full name';
                     }
-                    final trimmedValue = value.trim();
+                    // The formatter ensures it's already uppercase, but we still trim.
+                    final trimmedValue = value.trim(); 
 
                     // 1. Basic Character Check
                     if (!RegExp(r'^[a-zA-Z .]+$').hasMatch(trimmedValue)) {
@@ -272,7 +276,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     // Validate designation if present
                     if (hasDesignation) {
                         String designationText = parts[0].substring(0, parts[0].length - 1);
-                        if (!RegExp(r'^[a-zA-Z]+$').hasMatch(designationText)) {
+                        if (!RegExp(r'^[A-Z]+$').hasMatch(designationText)) { // Check for uppercase
                             return 'Designation part must contain only letters before the period (e.g., Dr., Prof.)';
                         }
                         namePartStartIndex = 1;
@@ -282,8 +286,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     int nameOrInitialCount = 0;
                     for (int i = namePartStartIndex; i < parts.length; i++) {
                         String currentPart = parts[i];
-                        bool isFullNamePart = RegExp(r'^[a-zA-Z]+$').hasMatch(currentPart);
-                        bool isInitialPart = RegExp(r'^[a-zA-Z]\.$').hasMatch(currentPart);
+                        bool isFullNamePart = RegExp(r'^[A-Z]+$').hasMatch(currentPart); // Check for uppercase
+                        bool isInitialPart = RegExp(r'^[A-Z]\.$').hasMatch(currentPart); // Check for uppercase
 
                         if (isFullNamePart || isInitialPart) {
                             nameOrInitialCount++;

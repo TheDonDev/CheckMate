@@ -204,7 +204,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         content: Text('Send a password reset link to ?'),
         actions: [
           TextButton( onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'), ),
-          TextButton( onPressed: () => Navigator.of(context).pop(true), child: const Text('Send'), style: TextButton.styleFrom(foregroundColor: brandColor), ),
+          TextButton( onPressed: () => Navigator.of(context).pop(true), style: TextButton.styleFrom(foregroundColor: brandColor), child: const Text('Send'), ),
         ],
       ),
     ) ?? false;

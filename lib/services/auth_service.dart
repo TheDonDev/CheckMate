@@ -202,7 +202,7 @@ class AuthService extends ChangeNotifier {
         // --- MODIFICATION: Apply .toUpperCase() to specific fields before saving ---
         Map<String, dynamic> userData = {
           'uid': firebaseUser.uid,
-          'name': trimmedName, // Save name as entered
+          'name': trimmedName.toUpperCase(), // Ensure name is saved in uppercase
           'email': trimmedEmail, // Save email in lowercase
           'phoneNumber': trimmedPhoneNumber, // Save phone number as trimmed
           'role': role, // Save role as determined (likely lowercase)

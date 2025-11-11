@@ -442,8 +442,8 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
                 ),
                 TextButton(
                   style: TextButton.styleFrom( foregroundColor: Colors.grey.shade700, padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 10), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), ),
-                  child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   onPressed: isDialogProcessingShare ? null : () { Navigator.of(dialogContext).pop(); },
+                  child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                 ),
               ],
             );
