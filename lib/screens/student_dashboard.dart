@@ -14,6 +14,7 @@ import 'package:checkmate/screens/qr_scanner_screen.dart';
 import 'package:collection/collection.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async'; // Import for TimeoutException
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 class StudentDashboard extends StatefulWidget {
   final app_user.User currentUser;
@@ -23,7 +24,7 @@ class StudentDashboard extends StatefulWidget {
   State<StudentDashboard> createState() => _StudentDashboardState();
 }
 
-class _StudentDashboardState extends State<StudentDashboard> {
+class _StudentDashboardState extends State<StudentDashboard> with SingleTickerProviderStateMixin {
   final ApiService apiService = ApiService();
 
   Stream<List<Lecture>>? _lecturesStream; // Changed from Future to Stream
@@ -48,6 +49,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
   int? _attendedLectures;
   List<AttendanceRecord>? _summaryAttendanceRecords;
 
+  // --- Ad State ---
+  BannerAd? _bannerAd;
+  bool _isBannerAdLoaded = false;
+  late AnimationController _adController;
+  late Animation<Offset> _offsetAnimation;
+
   static const Color brandColor = Color(0xFF0175C2);
 
   @override
@@ -59,7 +66,18 @@ class _StudentDashboardState extends State<StudentDashboard> {
     fixedYearOfStudy = widget.currentUser.yearOfStudy;
     fixedSemester = widget.currentUser.semester;
 
+    _adController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _offsetAnimation = Tween<Offset>(
+      begin: const Offset(0.0, 1.0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _adController, curve: Curves.easeOutQuart));
+
     _loadNames();
+    // Load the banner ad
+    _loadBannerAd();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -72,6 +90,13 @@ class _StudentDashboardState extends State<StudentDashboard> {
         _loadAttendanceSummary();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    _adController.dispose();
+    super.dispose();
   }
 
   // --- Dialogs ---
@@ -217,6 +242,55 @@ class _StudentDashboardState extends State<StudentDashboard> {
       } catch (e) {
         if (kDebugMode) print("Error loading semester name: $e");
       }
+    }
+  }
+
+  // --- Ad Loading ---
+  void _loadBannerAd() {
+    // IMPORTANT: Replace with your own Ad Unit ID from AdMob before publishing.
+    // This is a test ID provided by Google for development.
+    final adUnitId = defaultTargetPlatform == TargetPlatform.android
+        ? 'ca-app-pub-3940256099942544/6300978111' // Android test ad unit
+        : 'ca-app-pub-3940256099942544/2934735716'; // iOS test ad unit
+
+    _bannerAd = BannerAd(
+      adUnitId: adUnitId,
+      request: const AdRequest(),
+      size: AdSize.banner,
+      listener: BannerAdListener(
+        onAdLoaded: (Ad ad) {
+          if (kDebugMode) {
+            print('BannerAd loaded.');
+          }
+          if (mounted) {
+            setState(() {
+              _isBannerAdLoaded = true;
+            });
+            _adController.forward();
+          }
+        },
+        onAdFailedToLoad: (Ad ad, LoadAdError error) {
+          if (kDebugMode) {
+            print('BannerAd failed to load: $error');
+          }
+          ad.dispose();
+        },
+      ),
+    )..load();
+  }
+
+  Future<void> _dismissAd() async {
+    try {
+      await _adController.reverse();
+    } catch (e) {
+      // Ignore if controller is disposed during animation
+    }
+    if (mounted) {
+      setState(() {
+        _isBannerAdLoaded = false;
+      });
+      _bannerAd?.dispose();
+      _bannerAd = null;
     }
   }
 
@@ -974,6 +1048,54 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     ),
                   ),
           ),
+          // --- AD BANNER WIDGET ---
+          if (_bannerAd != null && _isBannerAdLoaded)
+            SlideTransition(
+              position: _offsetAnimation,
+              child: SafeArea(
+              top: false,
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, -2),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: SizedBox(
+                        width: _bannerAd!.size.width.toDouble(),
+                        height: _bannerAd!.size.height.toDouble(),
+                        child: AdWidget(ad: _bannerAd!),
+                      ),
+                    ),
+                    Positioned(
+                      right: 16,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: IconButton(
+                          icon: const Icon(Icons.close, size: 20, color: Colors.black54),
+                          onPressed: _dismissAd,
+                          tooltip: 'Close',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            ),
         ],
       ),
     );
