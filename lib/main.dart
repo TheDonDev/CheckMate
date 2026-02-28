@@ -2,7 +2,7 @@
 import 'package:checkmate/services/auth_service.dart';
 import 'package:checkmate/wrapper.dart'; 
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
@@ -22,7 +22,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize the Google Mobile Ads SDK
-  MobileAds.instance.initialize();
+  if (!kIsWeb) {
+    await MobileAds.instance.initialize();
+  }
 
   // Initialized Firebase using the generated options
   // This will connect to LIVE project defined in firebase_options.dart

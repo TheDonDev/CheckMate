@@ -88,7 +88,7 @@ app.use((err, req, res, next) => {
 // --- Start the Server ---
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`CORS configured to allow:`);
   console.log(`  - Requests with no origin`);
@@ -97,5 +97,18 @@ app.listen(PORT, () => {
     console.log(`  - Specific origins: ${specificAllowedOrigins.join(', ')}`);
   } else {
     console.log(`  - No specific origins currently listed in specificAllowedOrigins.`);
+  }
+
+  // --- Connection Verification ---
+  try {
+    console.log("Verifying Firestore connection...");
+    await db.listCollections();
+    console.log("✅ Firestore connection verified.");
+  } catch (error) {
+    console.error("❌ Firestore connection FAILED.");
+    console.error("Error details:", error.message);
+    if (error.message.includes("UNAUTHENTICATED") || error.message.includes("ACCESS_TOKEN_EXPIRED")) {
+        console.error("👉 SUGGESTION: Your local Google Cloud credentials may have expired.\n   Run: 'gcloud auth application-default login'");
+    }
   }
 });

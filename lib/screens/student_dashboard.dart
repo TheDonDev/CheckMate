@@ -14,7 +14,9 @@ import 'package:checkmate/screens/qr_scanner_screen.dart';
 import 'package:collection/collection.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async'; // Import for TimeoutException
+import 'dart:ui';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:shimmer/shimmer.dart';
 
 class StudentDashboard extends StatefulWidget {
   final app_user.User currentUser;
@@ -55,6 +57,11 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
   late AnimationController _adController;
   late Animation<Offset> _offsetAnimation;
 
+  // --- Interstitial Ad State ---
+  InterstitialAd? _interstitialAd;
+  int _numInterstitialLoadAttempts = 0;
+  final int maxFailedLoadAttempts = 3;
+
   static const Color brandColor = Color(0xFF0175C2);
 
   @override
@@ -78,6 +85,8 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
     _loadNames();
     // Load the banner ad
     _loadBannerAd();
+    // Load the interstitial ad
+    _createInterstitialAd();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -96,6 +105,7 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
   void dispose() {
     _bannerAd?.dispose();
     _adController.dispose();
+    _interstitialAd?.dispose();
     super.dispose();
   }
 
@@ -247,11 +257,17 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
 
   // --- Ad Loading ---
   void _loadBannerAd() {
-    // IMPORTANT: Replace with your own Ad Unit ID from AdMob before publishing.
-    // This is a test ID provided by Google for development.
-    final adUnitId = defaultTargetPlatform == TargetPlatform.android
-        ? 'ca-app-pub-3940256099942544/6300978111' // Android test ad unit
-        : 'ca-app-pub-3940256099942544/2934735716'; // iOS test ad unit
+    if (kIsWeb) return; // Prevent loading on Web
+    String adUnitId;
+    if (kDebugMode) {
+      adUnitId = defaultTargetPlatform == TargetPlatform.android
+          ? 'ca-app-pub-3940256099942544/6300978111' // Android Test ID
+          : 'ca-app-pub-3940256099942544/2934735716'; // iOS Test ID
+    } else {
+      adUnitId = defaultTargetPlatform == TargetPlatform.android
+          ? 'ca-app-pub-3940256099942544/6300978111' // Replace with your Android Production ID
+          : 'ca-app-pub-3940256099942544/2934735716'; // Replace with your iOS Production ID
+    }
 
     _bannerAd = BannerAd(
       adUnitId: adUnitId,
@@ -277,6 +293,59 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
         },
       ),
     )..load();
+  }
+
+  void _createInterstitialAd() {
+    if (kIsWeb) return; // Prevent loading on Web
+    String adUnitId;
+    if (kDebugMode) {
+      adUnitId = defaultTargetPlatform == TargetPlatform.android
+          ? 'ca-app-pub-3940256099942544/1033173712' // Android Test ID
+          : 'ca-app-pub-3940256099942544/4411468910'; // iOS Test ID
+    } else {
+      adUnitId = defaultTargetPlatform == TargetPlatform.android
+          ? 'ca-app-pub-3940256099942544/1033173712' // Replace with your Android Production ID
+          : 'ca-app-pub-3940256099942544/4411468910'; // Replace with your iOS Production ID
+    }
+
+    InterstitialAd.load(
+        adUnitId: adUnitId,
+        request: const AdRequest(),
+        adLoadCallback: InterstitialAdLoadCallback(
+          onAdLoaded: (InterstitialAd ad) {
+            if (kDebugMode) print('$ad loaded');
+            _interstitialAd = ad;
+            _numInterstitialLoadAttempts = 0;
+            _interstitialAd!.setImmersiveMode(true);
+          },
+          onAdFailedToLoad: (LoadAdError error) {
+            if (kDebugMode) print('InterstitialAd failed to load: $error.');
+            _numInterstitialLoadAttempts += 1;
+            _interstitialAd = null;
+            if (_numInterstitialLoadAttempts < maxFailedLoadAttempts) {
+              _createInterstitialAd();
+            }
+          },
+        ));
+  }
+
+  void _showInterstitialAd() {
+    if (_interstitialAd == null) {
+      if (kDebugMode) print('Warning: attempt to show interstitial before loaded.');
+      return;
+    }
+    _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (InterstitialAd ad) {
+        ad.dispose();
+        _createInterstitialAd();
+      },
+      onAdFailedToShowFullScreenContent: (InterstitialAd ad, AdError error) {
+        ad.dispose();
+        _createInterstitialAd();
+      },
+    );
+    _interstitialAd!.show();
+    _interstitialAd = null;
   }
 
   Future<void> _dismissAd() async {
@@ -412,6 +481,9 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
 
       await _loadAttendanceSummary();
       showSnackBar('Successfully joined ${lecture.unitName}!', isError: false);
+
+      // Show Interstitial Ad immediately after joining
+      _showInterstitialAd();
 
       if (lecture.venue.toLowerCase() == 'online' &&
           lecture.onlineLink != null &&
@@ -579,6 +651,47 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
 
   // --- UI Building ---
 
+  Widget _buildShimmerLoading() {
+    return ListView.builder(
+      padding: const EdgeInsets.only(left: 12, right: 12, top: 8, bottom: 80),
+      itemCount: 6,
+      itemBuilder: (context, index) {
+        return Card(
+          margin: const EdgeInsets.symmetric(vertical: 6.0),
+          elevation: 1.5,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 16.0),
+            child: Shimmer.fromColors(
+              baseColor: Colors.grey.shade300,
+              highlightColor: Colors.grey.shade100,
+              child: Row(
+                children: [
+                  const CircleAvatar(backgroundColor: Colors.white, radius: 24),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(width: double.infinity, height: 16, color: Colors.white),
+                        const SizedBox(height: 8),
+                        Container(width: 150, height: 12, color: Colors.white),
+                        const SizedBox(height: 8),
+                        Container(width: 100, height: 12, color: Colors.white),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Container(width: 60, height: 30, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15))),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // Summary Card
   Widget _buildAttendanceSummaryCard() {
     if (_isLoadingSummary) {
@@ -724,12 +837,14 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
         tooltip: 'Scan Lecture QR Code to Check-In',
       ) : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body: Stack(
         children: [
-          if (canPerformActions) _buildAttendanceSummaryCard(),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (canPerformActions) _buildAttendanceSummaryCard(),
 
-          if (canPerformActions) ...[
+              if (canPerformActions) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 8.0),
               child: Text( "Available Lectures", style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w500, color: brandColor), ),
@@ -775,7 +890,7 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
                       stream: _lecturesStream,
                       builder: (context, snapshot) { // *** START OF FutureBuilder builder ***
                         if (snapshot.connectionState == ConnectionState.waiting) {
-                          return Center(child: CircularProgressIndicator(color: brandColor));
+                          return _buildShimmerLoading();
                         }
 
                         // ***  ERROR HANDLING BLOCK ***
@@ -1048,53 +1163,69 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
                     ),
                   ),
           ),
+            ],
+          ),
           // --- AD BANNER WIDGET ---
           if (_bannerAd != null && _isBannerAdLoaded)
-            SlideTransition(
-              position: _offsetAnimation,
-              child: SafeArea(
-              top: false,
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, -2),
-                    ),
-                  ],
-                ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: SizedBox(
-                        width: _bannerAd!.size.width.toDouble(),
-                        height: _bannerAd!.size.height.toDouble(),
-                        child: AdWidget(ad: _bannerAd!),
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SlideTransition(
+                position: _offsetAnimation,
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.7),
+                        border: Border(
+                          top: BorderSide(color: Colors.white.withOpacity(0.5), width: 1.5),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, -5),
+                          ),
+                        ],
                       ),
-                    ),
-                    Positioned(
-                      right: 16,
-                      top: 0,
-                      bottom: 0,
-                      child: Center(
-                        child: IconButton(
-                          icon: const Icon(Icons.close, size: 20, color: Colors.black54),
-                          onPressed: _dismissAd,
-                          tooltip: 'Close',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
+                      child: SafeArea(
+                        top: false,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8.0),
+                              child: SizedBox(
+                                width: _bannerAd!.size.width.toDouble(),
+                                height: _bannerAd!.size.height.toDouble(),
+                                child: AdWidget(ad: _bannerAd!),
+                              ),
+                            ),
+                            Positioned(
+                              right: 16,
+                              top: 0,
+                              bottom: 0,
+                              child: Center(
+                                child: IconButton(
+                                  icon: const Icon(Icons.close, size: 20, color: Colors.black54),
+                                  onPressed: _dismissAd,
+                                  tooltip: 'Close',
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
             ),
         ],
       ),

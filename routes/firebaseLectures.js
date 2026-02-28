@@ -8,27 +8,6 @@ const checkAuth = require('../middleware/checkAuth'); // Ensure this path is cor
 // --- Load Environment Variables ---
 require('dotenv').config(); // Load variables from .env file
 
-// --- Twilio Setup ---
-const twilio = require('twilio');
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-const smsSenderName = process.env.SMS_SENDER_NAME || 'CheckmateApp'; // Default sender name
-
-let twilioClient = null; // Initialize as null
-
-// Validate Twilio credentials are loaded and initialize client
-if (!accountSid || !authToken || !messagingServiceSid) {
-  console.error("FATAL ERROR: Twilio credentials (SID, Token, Messaging Service SID) are missing in environment variables. SMS notifications will be disabled.");
-} else {
-  try {
-    twilioClient = twilio(accountSid, authToken);
-    console.log("Twilio client initialized successfully.");
-  } catch (error) {
-    console.error("FATAL ERROR: Failed to initialize Twilio client:", error);
-  }
-}
-
 // --- Constants ---
 const LECTURES_COLLECTION = 'lectures';
 const USERS_COLLECTION = 'users';
@@ -223,6 +202,7 @@ router.post('/', checkAuth, async (req, res) => {
       venue: venue.trim(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       onlineLink: finalOnlineLink,
+      reminderSent: false, // Initialize reminder flag
     };
     // --- *** ADDED LOG: Data before Firestore *** ---
     console.log('[POST /lectures] Prepared lecture data for Firestore:', JSON.stringify(newLectureData, null, 2));
@@ -245,87 +225,6 @@ router.post('/', checkAuth, async (req, res) => {
     } else {
         console.log(`[POST /lectures] Successfully fetched created document data.`);
     }
-
-    // --- 2. Prepare and Send SMS Notifications (for CREATE) ---
-    if (twilioClient && createdData) {
-        console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Preparing to send notifications...`);
-        console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Querying students matching: School='${createdData.school}', Dept='${createdData.department}', Course='${createdData.course}', Year='${createdData.yearOfStudy}', Sem='${createdData.semester}', Verified=true`);
-
-        const studentsQuery = db.collection(USERS_COLLECTION)
-            .where('role', '==', 'student')
-            .where('school', '==', createdData.school)
-            .where('department', '==', createdData.department)
-            .where('course', '==', createdData.course)
-            .where('yearOfStudy', '==', createdData.yearOfStudy)
-            .where('semester', '==', createdData.semester)
-            .where('isVerified', '==', true);
-
-        try {
-            const studentsSnapshot = await studentsQuery.get();
-            if (studentsSnapshot.empty) {
-                console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] No matching verified students found for these criteria.`);
-            } else {
-                console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Found ${studentsSnapshot.size} potential student(s) for notification.`);
-                const smsStartTime = formatDateTimeForSMS(createdData.startTime.toDate()); // Use .toDate() on Firestore Timestamp
-                let smsVenueInfo = `at ${createdData.venue}`;
-                if (createdData.venue.toUpperCase() === 'ONLINE' && createdData.onlineLink) {
-                    smsVenueInfo = `online. Link: ${createdData.onlineLink}`;
-                }
-                const smsMessageBody = `${smsSenderName} Alert: New lecture for ${createdData.unitName} (${createdData.unitCode}) by ${createdData.lecturerName} on ${smsStartTime} ${smsVenueInfo}.`;
-                console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Message Body: "${smsMessageBody}"`);
-                const smsPromises = [];
-
-                studentsSnapshot.forEach(studentDoc => {
-                    const studentData = studentDoc.data();
-                    const studentId = studentDoc.id;
-                    const studentPhoneNumber = studentData.phoneNumber;
-                    // --- *** ADDED LOG: Phone number validation *** ---
-                    if (studentPhoneNumber && typeof studentPhoneNumber === 'string' && studentPhoneNumber.startsWith('+') && studentPhoneNumber.length > 10) {
-                        console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Scheduling SMS to valid number: ${studentPhoneNumber} (Student ID: ${studentId})`);
-                        smsPromises.push(
-                            twilioClient.messages.create({
-                                body: smsMessageBody,
-                                messagingServiceSid: messagingServiceSid,
-                                to: studentPhoneNumber
-                            })
-                            .then(message => {
-                                console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Successfully sent SMS to ${studentPhoneNumber} (SID: ${message.sid})`);
-                                return { status: 'fulfilled', sid: message.sid, phone: studentPhoneNumber };
-                            })
-                            .catch(error => {
-                                console.warn(`[POST /lectures] [SMS CREATE ${createdLectureId}] FAILED to send SMS to ${studentPhoneNumber} (Code: ${error.code || 'N/A'}): ${error.message}`);
-                                return { status: 'rejected', error: error.message, phone: studentPhoneNumber, code: error.code };
-                            })
-                        );
-                    } else {
-                        console.warn(`[POST /lectures] [SMS CREATE ${createdLectureId}] Skipping student ${studentId}: Invalid or missing phone number ('${studentPhoneNumber}')`);
-                    }
-                });
-
-                if (smsPromises.length > 0) {
-                    console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Waiting for ${smsPromises.length} SMS sending attempt(s) to complete...`);
-                    const results = await Promise.allSettled(smsPromises);
-                    const successfulSends = results.filter(r => r.status === 'fulfilled').length;
-                    const failedSends = results.filter(r => r.status === 'rejected').length;
-                    console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] Sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
-                    // Detailed logging for failures is already inside the .catch block above
-                } else {
-                     console.log(`[POST /lectures] [SMS CREATE ${createdLectureId}] No valid student phone numbers found to send SMS.`);
-                }
-            }
-        } catch (queryError) {
-            console.error(`[POST /lectures] [SMS CREATE ${createdLectureId}] Error querying students or processing SMS:`, queryError);
-             if (queryError.code === 'failed-precondition' || (queryError.message && queryError.message.includes('index'))) {
-                 console.error("[POST /lectures] [SMS CREATE ${createdLectureId}] Firestore Index Missing for Student Query. Check Firebase console for index creation link in error details.");
-             }
-             // Continue execution, don't let SMS failure stop the response
-        }
-    } else if (!twilioClient) {
-        console.warn(`[POST /lectures] [SMS CREATE ${createdLectureId || 'N/A'}] Twilio client not initialized. Skipping SMS notifications.`);
-    } else if (!createdData) {
-         console.warn(`[POST /lectures] [SMS CREATE ${createdLectureId || 'N/A'}] Created lecture data was unavailable. Skipping SMS notifications.`);
-    }
-    // --- End SMS Logic for CREATE ---
 
     // --- 3. Return the success response to the client ---
     // Use fetched data (createdData) if available, format timestamps for client
@@ -734,6 +633,7 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
                          return res.status(400).json({ error: `Invalid date format provided for ${field}. Expected ISO string.` });
                     }
                     allowedUpdates[field] = parsedDate; // Store the parsed JS Date or null
+                    if (field === 'startTime') allowedUpdates.reminderSent = false; // Reset reminder if time changes
                 }
                 else if (field === 'onlineLink') {
                     allowedUpdates[field] = updateData[field]?.trim() || null; // Trim or set to null
@@ -806,86 +706,6 @@ router.put('/:lectureId', checkAuth, async (req, res) => {
              console.log(`[PUT /${lectureId}] Fetched updated lecture data successfully.`);
         }
         // --- End Fetch Updated Data ---
-
-
-        // --- Prepare and Send SMS Notifications (for UPDATE) ---
-        if (twilioClient && updatedLecture) {
-            console.log(`[PUT /${lectureId}] [SMS UPDATE] Preparing to send notifications...`);
-            console.log(`[PUT /${lectureId}] [SMS UPDATE] Querying students matching UPDATED criteria: School='${updatedLecture.school}', Dept='${updatedLecture.department}', Course='${updatedLecture.course}', Year='${updatedLecture.yearOfStudy}', Sem='${updatedLecture.semester}', Verified=true`);
-
-            const studentsQuery = db.collection(USERS_COLLECTION)
-                .where('role', '==', 'student')
-                .where('school', '==', updatedLecture.school)
-                .where('department', '==', updatedLecture.department)
-                .where('course', '==', updatedLecture.course)
-                .where('yearOfStudy', '==', updatedLecture.yearOfStudy)
-                .where('semester', '==', updatedLecture.semester)
-                .where('isVerified', '==', true);
-
-            try {
-                const studentsSnapshot = await studentsQuery.get();
-                if (studentsSnapshot.empty) {
-                    console.log(`[PUT /${lectureId}] [SMS UPDATE] No matching verified students found for updated criteria.`);
-                } else {
-                    console.log(`[PUT /${lectureId}] [SMS UPDATE] Found ${studentsSnapshot.size} potential student(s) for notification.`);
-                    const smsStartTime = formatDateTimeForSMS(updatedLecture.startTime.toDate());
-                    let smsVenueInfo = `at ${updatedLecture.venue}`;
-                    if (updatedLecture.venue.toUpperCase() === 'ONLINE' && updatedLecture.onlineLink) {
-                        smsVenueInfo = `online. Link: ${updatedLecture.onlineLink}`;
-                    }
-                    const smsMessageBody = `${smsSenderName} Update: Lecture for ${updatedLecture.unitName} (${updatedLecture.unitCode}) by ${updatedLecture.lecturerName} is now scheduled for ${smsStartTime} ${smsVenueInfo}.`;
-                    console.log(`[PUT /${lectureId}] [SMS UPDATE] Message Body: "${smsMessageBody}"`);
-                    const smsPromises = [];
-
-                    studentsSnapshot.forEach(studentDoc => {
-                        const studentData = studentDoc.data();
-                        const studentId = studentDoc.id;
-                        const studentPhoneNumber = studentData.phoneNumber;
-                        if (studentPhoneNumber && typeof studentPhoneNumber === 'string' && studentPhoneNumber.startsWith('+') && studentPhoneNumber.length > 10) {
-                            console.log(`[PUT /${lectureId}] [SMS UPDATE] Scheduling SMS to valid number: ${studentPhoneNumber} (Student ID: ${studentId})`);
-                            smsPromises.push(
-                                twilioClient.messages.create({
-                                    body: smsMessageBody,
-                                    messagingServiceSid: messagingServiceSid,
-                                    to: studentPhoneNumber
-                                })
-                                .then(message => {
-                                    console.log(`[PUT /${lectureId}] [SMS UPDATE] Successfully sent SMS to ${studentPhoneNumber} (SID: ${message.sid})`);
-                                    return { status: 'fulfilled', sid: message.sid, phone: studentPhoneNumber };
-                                })
-                                .catch(error => {
-                                    console.warn(`[PUT /${lectureId}] [SMS UPDATE] FAILED to send SMS to ${studentPhoneNumber} (Code: ${error.code || 'N/A'}): ${error.message}`);
-                                    return { status: 'rejected', error: error.message, phone: studentPhoneNumber, code: error.code };
-                                })
-                            );
-                        } else {
-                            console.warn(`[PUT /${lectureId}] [SMS UPDATE] Skipping student ${studentId}: Invalid or missing phone number ('${studentPhoneNumber}')`);
-                        }
-                    });
-
-                    if (smsPromises.length > 0) {
-                        console.log(`[PUT /${lectureId}] [SMS UPDATE] Waiting for ${smsPromises.length} SMS sending attempt(s) to complete...`);
-                        const results = await Promise.allSettled(smsPromises);
-                        const successfulSends = results.filter(r => r.status === 'fulfilled').length;
-                        const failedSends = results.filter(r => r.status === 'rejected').length;
-                        console.log(`[PUT /${lectureId}] [SMS UPDATE] Sending complete: ${successfulSends} succeeded, ${failedSends} failed.`);
-                    } else {
-                         console.log(`[PUT /${lectureId}] [SMS UPDATE] No valid student phone numbers found to send SMS.`);
-                    }
-                }
-            } catch (smsQueryError) {
-                console.error(`[PUT /${lectureId}] [SMS UPDATE] Error querying students or processing SMS:`, smsQueryError);
-                 if (smsQueryError.code === 'failed-precondition' || (smsQueryError.message && smsQueryError.message.includes('index'))) {
-                     console.error(`[PUT /${lectureId}] [SMS UPDATE] Firestore Index Missing for Student Query.`);
-                 }
-                 // Continue execution
-            }
-        } else if (!twilioClient) {
-            console.warn(`[PUT /${lectureId}] [SMS UPDATE] Twilio client not initialized. Skipping SMS notifications.`);
-        } else if (!updatedLecture) {
-             console.warn(`[PUT /${lectureId}] [SMS UPDATE] Updated lecture data was unavailable. Skipping SMS notifications.`);
-        }
-        // --- END SMS Logic for UPDATE ---
 
 
         // --- Return Success Response ---
