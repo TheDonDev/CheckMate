@@ -64,6 +64,31 @@ class User {
     );
   }
 
+  factory User.fromApiJson(Map<String, dynamic> data) {
+    final rawCreatedAt = data['createdAt'];
+    DateTime? createdAt;
+    if (rawCreatedAt is Timestamp) {
+      createdAt = rawCreatedAt.toDate();
+    } else if (rawCreatedAt is String) {
+      createdAt = DateTime.tryParse(rawCreatedAt);
+    }
+    return User(
+      id: data['id']?.toString() ?? data['uid']?.toString() ?? '',
+      name: data['name']?.toString() ?? '',
+      email: data['email']?.toString() ?? '',
+      phoneNumber: data['phoneNumber']?.toString() ?? '',
+      role: data['role']?.toString() ?? 'student',
+      isVerified: data['isVerified'] == true,
+      school: data['school']?.toString(),
+      department: data['department']?.toString(),
+      course: data['course']?.toString(),
+      registrationNumber: data['registrationNumber']?.toString(),
+      yearOfStudy: data['yearOfStudy']?.toString(),
+      semester: data['semester']?.toString(),
+      createdAt: createdAt == null ? null : Timestamp.fromDate(createdAt),
+    );
+  }
+
   // --- Method to convert User object to a Map for Firestore ---
   // This is typically used when *creating* or *updating* data FROM the client.
   Map<String, dynamic> toFirestore() {

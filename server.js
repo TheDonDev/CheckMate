@@ -1,8 +1,8 @@
 const express = require('express');
-const cors = require('cors'); // Import the cors package
+const cors = require('cors');
 const dotenv = require('dotenv');
-const { db, messaging, admin } = require('./firebase'); // Assuming firebase.js exports these correctly
 dotenv.config();
+const { initializeDatabase } = require('./db');
 
 const app = express();
 
@@ -50,24 +50,15 @@ app.use(cors(corsOptions));
 // --- Standard Middleware ---
 app.use(express.json());
 
-// --- API Route Definitions ---
-const firebaseLectureRoutes = require('./routes/firebaseLectures');
-const firebaseAttendanceRoutes = require('./routes/firebaseAttendance');
-const firebaseUserRoutes = require('./routes/firebaseUsers');
-const firebaseSchoolRoutes = require('./routes/firebaseSchools');
-const firebaseDepartmentRoutes = require('./routes/firebaseDepartments');
-const firebaseCourseRoutes = require('./routes/firebaseCourses');
-
-app.use('/api/firebase/lectures', firebaseLectureRoutes);
-app.use('/api/firebase/attendance', firebaseAttendanceRoutes);
-app.use('/api/firebase/users', firebaseUserRoutes);
-app.use('/api/firebase/schools', firebaseSchoolRoutes);
-app.use('/api/firebase/departments', firebaseDepartmentRoutes);
-app.use('/api/firebase/courses', firebaseCourseRoutes);
+app.use('/api/auth', require('./routes/localAuth'));
+app.use('/api/catalog', require('./routes/localCatalog'));
+app.use('/api/firebase/users', require('./routes/localUsers'));
+app.use('/api/firebase/lectures', require('./routes/localLectures'));
+app.use('/api/firebase/attendance', require('./routes/localAttendance'));
 
 // --- Health Check Endpoint ---
 app.get('/health', (req, res) => {
-  res.status(200).send('Server is healthy');
+  res.status(200).json({ status: 'ok', database: 'postgresql' });
 });
 
 // --- Global Error Handler ---
@@ -88,27 +79,9 @@ app.use((err, req, res, next) => {
 // --- Start the Server ---
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, async () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`CORS configured to allow:`);
-  console.log(`  - Requests with no origin`);
-  console.log(`  - Any origin matching http://localhost:<port> or http://127.0.0.1:<port> (for development)`);
-  if (specificAllowedOrigins.length > 0) {
-    console.log(`  - Specific origins: ${specificAllowedOrigins.join(', ')}`);
-  } else {
-    console.log(`  - No specific origins currently listed in specificAllowedOrigins.`);
-  }
-
-  // --- Connection Verification ---
-  try {
-    console.log("Verifying Firestore connection...");
-    await db.listCollections();
-    console.log("✅ Firestore connection verified.");
-  } catch (error) {
-    console.error("❌ Firestore connection FAILED.");
-    console.error("Error details:", error.message);
-    if (error.message.includes("UNAUTHENTICATED") || error.message.includes("ACCESS_TOKEN_EXPIRED")) {
-        console.error("👉 SUGGESTION: Your local Google Cloud credentials may have expired.\n   Run: 'gcloud auth application-default login'");
-    }
-  }
-});
+initializeDatabase()
+  .then(() => app.listen(PORT, () => console.log(`CheckMate API listening on port ${PORT}`)))
+  .catch((error) => {
+    console.error(`PostgreSQL initialization failed: ${error.message}`);
+    process.exitCode = 1;
+  });

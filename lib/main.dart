@@ -1,7 +1,7 @@
 // lib/main.dart
+import 'dart:io';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:checkmate/wrapper.dart'; 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -13,37 +13,19 @@ import 'package:provider/provider.dart';
 // import 'package:cloud_functions/cloud_functions.dart';
 // import 'package:firebase_storage/firebase_storage.dart';
 
-import 'firebase_options.dart';
-
-
-
 Future<void> main() async {
   // Flutter bindings are initialized before any Flutter/Firebase code
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize the Google Mobile Ads SDK
-  if (!kIsWeb) {
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     await MobileAds.instance.initialize();
   }
 
-  // Initialized Firebase using the generated options
-  // This will connect to LIVE project defined in firebase_options.dart
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    print("Firebase initialized successfully (connecting to live project).");
-  } catch (e) {
-    print("Error initializing Firebase: $e");
-    //  an error UI or exiting if Firebase init fails
-    return; // Exits if Firebase fails to initialize
-  }
-
-  
   if (kDebugMode) {
-     print('--- Running in Debug mode: Using Production Firebase ---');
+     print('--- Running in Debug mode: Using the local CheckMate API ---');
   } else {
-    print('--- Running in Profile/Release mode: Using Production Firebase ---');
+    print('--- Running in Profile/Release mode ---');
   }
 
   // Run the app

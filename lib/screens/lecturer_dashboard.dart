@@ -1,7 +1,6 @@
 // lib/screens/lecturer_dashboard.dart
 import 'dart:async'; // Import for TimeoutException
 export 'lecturer_dashboard.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/screens/lecture_attendance_screen.dart';
@@ -65,14 +64,9 @@ class _LecturerDashboardState extends State<LecturerDashboard> {
     if (!mounted) return;
     if (kDebugMode) print("Fetching lectures for lecturer ID: ${widget.currentUser.id}");
     setState(() {
-      // Transform the Stream<QuerySnapshot> into a Stream<List<Lecture>>
-      _lecturesStream = FirebaseFirestore.instance
-          .collection('lectures')
-          .where('lecturerId', isEqualTo: widget.currentUser.id)
-          .snapshots() // This returns a Stream<QuerySnapshot>
-          .map((snapshot) => snapshot.docs // This maps the stream to what the UI expects
-              .map((doc) => Lecture.fromFirestore(doc))
-              .toList());
+      _lecturesStream = Stream<List<Lecture>>.fromFuture(
+        apiService.getLecturesForLecturer(widget.currentUser.id),
+      );
     });
   }
 

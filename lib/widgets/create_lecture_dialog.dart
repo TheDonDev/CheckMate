@@ -4,7 +4,6 @@ import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/services/admin_service.dart';
 // import 'package:checkmate/widgets/document_name_widget.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart'; // Import kDebugMode
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -333,7 +332,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 // --- End Read-Only Fields ---
 
                 // --- Dropdowns ---
-                StreamBuilder<QuerySnapshot>(
+                StreamBuilder<LocalQuerySnapshot>(
                   stream: _adminService.getSchools(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -365,7 +364,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                 ),
                 const SizedBox(height: 12),
                 if (_selectedSchoolId != null)
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _adminService.getDepartments(_selectedSchoolId!),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -398,7 +397,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   ),
                 const SizedBox(height: 12),
                 if (_selectedDepartmentId != null)
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _adminService.getCourses(_selectedDepartmentId!),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -429,7 +428,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                     },
                   ),
                 const SizedBox(height: 12),
-                StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                   stream: _adminService.getYearsOfStudy(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -454,7 +453,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                   },
                 ),
                 const SizedBox(height: 12),
-                StreamBuilder<QuerySnapshot>(
+                StreamBuilder<LocalQuerySnapshot>(
                   stream: _adminService.getSemesters(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
@@ -575,7 +574,7 @@ class _CreateLectureDialogState extends State<CreateLectureDialog> {
                  // --- End Date/Time Pickers ---
 
                 // --- Venue Dropdown ---
-                StreamBuilder<QuerySnapshot>(
+                StreamBuilder<LocalQuerySnapshot>(
                   stream: _adminService.getVenues(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {

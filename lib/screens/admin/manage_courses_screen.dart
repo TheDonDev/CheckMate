@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:checkmate/services/admin_service.dart';
 import 'package:flutter/services.dart';
 
@@ -42,7 +41,7 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
     }
   }
 
-  void _showEditDialog(DocumentSnapshot document) {
+  void _showEditDialog(LocalDocumentSnapshot document) {
     final TextEditingController editController =
         TextEditingController(text: document['name']);
     showDialog(
@@ -118,7 +117,7 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: StreamBuilder<QuerySnapshot>(
+            child: StreamBuilder<LocalQuerySnapshot>(
               stream: _adminService.getSchools(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
@@ -148,7 +147,7 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
           if (_selectedSchoolId != null)
             Padding(
               padding: const EdgeInsets.all(8.0),
-              child: StreamBuilder<QuerySnapshot>(
+              child: StreamBuilder<LocalQuerySnapshot>(
                 stream: _adminService.getDepartments(_selectedSchoolId!),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
@@ -198,7 +197,7 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
             ),
           if (_selectedDepartmentId != null)
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
+              child: StreamBuilder<LocalQuerySnapshot>(
                 stream: _adminService.getCourses(_selectedDepartmentId!),
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
@@ -210,7 +209,7 @@ class _ManageCoursesScreenState extends State<ManageCoursesScreen> {
                   }
 
                   return ListView(
-                    children: snapshot.data!.docs.map((DocumentSnapshot document) {
+                    children: snapshot.data!.docs.map((LocalDocumentSnapshot document) {
                       Map<String, dynamic> data = document.data()! as Map<String, dynamic>;
                       return ListTile(
                         title: Text(data['name']),

@@ -1,5 +1,4 @@
 import 'package:checkmate/services/admin_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 // Data class to hold filter values returned by the dialog
@@ -133,7 +132,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
                 if (widget.fixedSchool != null) ...[
                   _buildDisabledInfoField('School', widget.fixedSchool!),
                   const SizedBox(height: 15),
-                ] else StreamBuilder<QuerySnapshot>(
+                ] else StreamBuilder<LocalQuerySnapshot>(
                   stream: _adminService.getSchools(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) return const CircularProgressIndicator();
@@ -160,7 +159,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
                 if (widget.fixedDepartment != null) ...[
                   _buildDisabledInfoField('Department', widget.fixedDepartment!),
                   const SizedBox(height: 15),
-                ] else StreamBuilder<QuerySnapshot>(
+                ] else StreamBuilder<LocalQuerySnapshot>(
                   stream: _selectedSchoolId == null ? null : _adminService.getDepartments(_selectedSchoolId!),
                   builder: (context, snapshot) {
                     if (_selectedSchoolId == null) {
@@ -193,7 +192,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
                 if (widget.fixedCourse != null) ...[
                   _buildDisabledInfoField('Course', widget.fixedCourse!),
                   const SizedBox(height: 15),
-                ] else StreamBuilder<QuerySnapshot>(
+                ] else StreamBuilder<LocalQuerySnapshot>(
                   stream: _selectedDepartmentId == null ? null : _adminService.getCourses(_selectedDepartmentId!),
                   builder: (context, snapshot) {
                     if (_selectedDepartmentId == null) {
@@ -225,7 +224,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
               // --- End Conditional Fields ---
 
               // --- Year Dropdown (Always Visible) ---
-              StreamBuilder<QuerySnapshot>(
+              StreamBuilder<LocalQuerySnapshot>(
                 stream: _adminService.getYearsOfStudy(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const CircularProgressIndicator();
@@ -252,7 +251,7 @@ class _LectureFilterDialogState extends State<LectureFilterDialog> {
               const SizedBox(height: 15),
 
               // --- Semester Dropdown (Always Visible) ---
-              StreamBuilder<QuerySnapshot>(
+              StreamBuilder<LocalQuerySnapshot>(
                 stream: _adminService.getSemesters(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const CircularProgressIndicator();

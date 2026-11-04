@@ -6,7 +6,6 @@ import 'dart:ui' as ui;
 import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/models/attendance_record.dart'; // Ensure this path is correct
 import 'package:checkmate/services/api_service.dart';
-import 'package:checkmate/services/storage_service.dart'; // Import StorageService
 import 'package:checkmate/widgets/document_name_widget.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for Timestamp comparison
 import 'package:flutter/material.dart';
@@ -15,7 +14,6 @@ import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart'; // Import path_provider
-import 'package:url_launcher/url_launcher.dart'; // Import url_launcher
 import 'package:share_plus/share_plus.dart'; // Import share_plus
 
 
@@ -30,7 +28,6 @@ class LectureAttendanceScreen extends StatefulWidget {
 
 class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   final ApiService _apiService = ApiService();
-  final StorageService _storageService = StorageService(); // Instantiate StorageService
   Future<List<AttendanceRecord>>? _attendanceFuture;
   final GlobalKey _qrKey = GlobalKey();
   bool _isProcessingExport = false; // Flag for export loading state
@@ -151,118 +148,35 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
   }
 
   Future<String?> _exportAttendanceCsv() async {
-    if (kDebugMode) print("[DEBUG] _exportAttendanceCsv called.");
-
-    if (_isProcessingExport || _sortedAttendanceList.isEmpty) {
-       if(kDebugMode) print("[DEBUG] Export skipped: Processing=$_isProcessingExport, ListEmpty=${_sortedAttendanceList.isEmpty}");
-       return null;
-    }
-
-    if(kDebugMode) print("[DEBUG] Starting CSV export process...");
-    setState(() { _isProcessingExport = true; });
-
+    if (_isProcessingExport || _sortedAttendanceList.isEmpty) return null;
+    setState(() => _isProcessingExport = true);
     try {
-      if (kDebugMode) print("[DEBUG] Generating CSV data...");
-      final String csvData = _generateCsvData(_sortedAttendanceList);
-      final Uint8List csvBytes = utf8.encode(csvData); // Convert String to Uint8List
-
+      final csvBytes = Uint8List.fromList(utf8.encode(_generateCsvData(_sortedAttendanceList)));
       final safeUnitCode = widget.lecture.unitCode.replaceAll(RegExp(r'[^\w\.-]+'), '_');
       final safeUnitName = widget.lecture.unitName.replaceAll(RegExp(r'[^\w\.-]+'), '_');
       final dateStamp = DateFormat('yyyyMMdd').format(widget.lecture.startTime?.toLocal() ?? DateTime.now());
       final fileName = 'Attendance_${safeUnitCode}_${safeUnitName}_$dateStamp.csv';
-      final String storagePath = 'attendance_records/${widget.lecture.id}'; // e.g., attendance_records/lectureId/filename.csv
-
-      String? downloadUrl;
-
-      // Show a generic "preparing" message before platform-specific logic
-      if (mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(
-           const SnackBar(content: Text('Preparing attendance data for upload...'), duration: Duration(seconds: 2)),
-         );
-      }
+      final XFile exportFile;
 
       if (kIsWeb) {
-        // Web platform: Upload bytes directly
-        if (kDebugMode) print('[DEBUG] Web platform detected. Uploading $fileName to $storagePath directly with bytes.');
-        downloadUrl = await _storageService.uploadFile(storagePath, fileName, csvBytes);
+        exportFile = XFile.fromData(csvBytes, name: fileName, mimeType: 'text/csv');
       } else {
-        // Native platforms: Use existing file-based logic
-        if (kDebugMode) print("[DEBUG] Native platform. Getting temporary directory...");
-        final tempDir = await getTemporaryDirectory();
-        final filePath = '${tempDir.path}/$fileName';
-        final file = File(filePath);
-        if (kDebugMode) print('[DEBUG] Target file path (native): $filePath');
-
-        if (kDebugMode) print('[DEBUG] Writing CSV data to file (native)...');
-        await file.writeAsBytes(csvBytes, flush: true); // Using writeAsBytes for consistency
-        final fileExists = await file.exists();
-        final fileLength = fileExists ? await file.length() : -1;
-        if (kDebugMode) print('[DEBUG] CSV file write complete (native). Exists: $fileExists, Length: $fileLength bytes');
-
-        if (!fileExists || fileLength <= 0) {
-            throw Exception("Failed to write CSV file or file is empty (native).");
-        }
-        
-        if (kDebugMode) print('[DEBUG] Uploading $fileName from $filePath to $storagePath (native)...');
-        downloadUrl = await _storageService.uploadFile(storagePath, fileName, await file.readAsBytes());
+        final directory = await getTemporaryDirectory();
+        final file = File('${directory.path}/$fileName');
+        await file.writeAsBytes(csvBytes, flush: true);
+        exportFile = XFile(file.path);
       }
 
-
-      if (downloadUrl != null) {
-        if (kDebugMode) print("[DEBUG] File uploaded successfully. Download URL: $downloadUrl");
-        if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-             SnackBar(
-                content: const Text('Attendance CSV uploaded!'),
-                backgroundColor: Colors.green.shade600,
-                duration: const Duration(seconds: 5),
-                action: SnackBarAction(
-                  label: 'DOWNLOAD',
-                  textColor: Colors.white,
-                  onPressed: () async {
-                    // Ensure downloadUrl is not null before using it
-                    if (downloadUrl != null) {
-                      if (await canLaunchUrl(Uri.parse(downloadUrl))) {
-                        await launchUrl(Uri.parse(downloadUrl));
-                      } else {
-                        if (kDebugMode) print('[DEBUG] Could not launch $downloadUrl');
-                        if (mounted) { // Check mounted again inside async callback
-                           ScaffoldMessenger.of(context).showSnackBar(
-                             SnackBar(content: const Text('Could not open download link.'), backgroundColor: Colors.red.shade400),
-                           );
-                        }
-                      }
-                    }
-                  },
-                ),
-              ),
-           );
-        }
-        return downloadUrl; // Return the URL on success
-      } else { // downloadUrl is null
-        if (kDebugMode) print("[DEBUG] File upload failed or downloadUrl is null.");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: const Text('Failed to upload attendance file.'), backgroundColor: Colors.red.shade600),
-          );
-        }
-        return null; // Return null on failure to upload
-      }
-
-    } catch (e, s) {
-      if (kDebugMode) {
-         print("[DEBUG] Error exporting attendance CSV: $e");
-         print("[DEBUG] Stack trace: $s");
-      }
+      await Share.shareXFiles([exportFile], text: 'Attendance for ${widget.lecture.unitName} (${widget.lecture.unitCode})');
       if (mounted) {
-        _showErrorDialog('Export Error', 'An error occurred while processing the attendance file: ${e.toString()}');
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Attendance CSV is ready to share.')));
       }
-      return null; // Return null on error
+      return fileName;
+    } catch (error) {
+      if (mounted) _showErrorDialog('Export Error', 'Could not prepare the attendance file: $error');
+      return null;
     } finally {
-      if (mounted) {
-        if (kDebugMode) print("[DEBUG] CSV export process finished.");
-        setState(() { _isProcessingExport = false; });
-      }
+      if (mounted) setState(() => _isProcessingExport = false);
     }
   }
   // --- End CSV Export Logic ---

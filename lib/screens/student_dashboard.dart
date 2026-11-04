@@ -184,15 +184,8 @@ class _StudentDashboardState extends State<StudentDashboard> with SingleTickerPr
     if (!mounted) return;
 
     setState(() {
-      // Use a stream to get real-time updates for lectures.
-      // This stream combines lectures the student has joined with currently available lectures.
       _lecturesStream = apiService.getStudentLecturesStream(
         userId: widget.currentUser.id,
-        schoolId: fixedSchool!,
-        departmentId: fixedDepartment!,
-        courseId: fixedCourse!,
-        yearId: fixedYearOfStudy!,
-        semesterId: fixedSemester!,
       );
     });
   }

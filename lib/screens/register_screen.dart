@@ -1,5 +1,4 @@
 import 'package:checkmate/services/admin_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:checkmate/screens/login_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:flutter/material.dart';
@@ -409,7 +408,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 18),
 
                   // Year of Study Dropdown
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _adminService.getYearsOfStudy(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) return const CircularProgressIndicator();
@@ -436,7 +435,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 18),
 
                   // Semester Dropdown
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _adminService.getSemesters(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) return const CircularProgressIndicator();
@@ -528,7 +527,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                 // --- School/Dept/Course Dropdowns (Visible unless admin) ---
                 if (!_isAdmin) ...[
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _adminService.getSchools(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {

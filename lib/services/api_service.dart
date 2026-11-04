@@ -4,9 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:checkmate/models/attendance_record.dart';
 import 'package:checkmate/models/lecture.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:checkmate/services/auth_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 
 // Define Custom Exceptions for better error handling
@@ -61,25 +60,9 @@ class ApiService {
     }
     headers['Accept'] = 'application/json';
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      try {
-        final idToken = await user.getIdToken(false);
-        if (idToken != null) {
-          headers['Authorization'] = 'Bearer $idToken';
-           if (kDebugMode) print("Auth Token included in headers.");
-        } else {
-           if (kDebugMode) print("Warning: Could not get ID token for authenticated user.");
-           throw ApiException("Authentication token unavailable.", statusCode: 401);
-        }
-      } catch (e) {
-         if (kDebugMode) print("Error getting ID token: $e");
-         throw ApiException("Failed to retrieve authentication token. Please try logging in again.", statusCode: 401);
-      }
-    } else {
-       if (kDebugMode) print("Warning: No authenticated user found for API request.");
-       throw ApiException("User not authenticated. Please log in.", statusCode: 401);
-    }
+     final token = AuthService.accessToken;
+     if (token == null) throw ApiException("User not authenticated. Please log in.", statusCode: 401);
+     headers['Authorization'] = 'Bearer $token';
     return headers;
   }
 
@@ -195,75 +178,11 @@ class ApiService {
     }
   }
 
-  /// Returns a real-time stream of lectures for the student dashboard.
-  ///
-  /// This method combines two streams:
-  /// 1. Lectures the student has already joined (via their attendance records).
-  /// 2. Upcoming lectures available for their course that they haven't joined yet.
-  Stream<List<Lecture>> getStudentLecturesStream({
-    required String userId,
-    required String schoolId,
-    required String departmentId,
-    required String courseId,
-    required String yearId,
-    required String semesterId,
-  }) {
-    final db = FirebaseFirestore.instance;
-
-    // Stream 1: Get IDs of lectures the student has joined.
-    final joinedLectureIdsStream = db
-        .collection('attendance')
-        .where('userId', isEqualTo: userId)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) => doc.data()['lectureId'] as String?).whereType<String>().toSet());
-
-    // Stream 2: Get all potentially available lectures for the student's profile.
-    // Filters for today and future lectures.
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
-    final availableLecturesStream = db
-        .collection('lectures')
-        .where('school', isEqualTo: schoolId)
-        .where('department', isEqualTo: departmentId)
-        .where('course', isEqualTo: courseId)
-        .where('yearOfStudy', isEqualTo: yearId)
-        .where('semester', isEqualTo: semesterId)
-        .where('lectureDate', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
-        .snapshots();
-
-    // Combine the two streams.
-    return joinedLectureIdsStream
-        .asyncMap((joinedIds) async {
-          List<Lecture> allLectures = [];
-
-          // Fetch full documents for lectures the student has joined.
-          if (joinedIds.isNotEmpty) {
-            // Firestore 'in' query is limited to 30 items. Chunk if necessary.
-            final joinedLecturesSnapshot = await db
-                .collection('lectures')
-                .where(FieldPath.documentId, whereIn: joinedIds.toList())
-                .get();
-            allLectures.addAll(joinedLecturesSnapshot.docs.map((doc) => Lecture.fromFirestore(doc)));
-          }
-
-          // Return the list of already-joined lectures for use in the next step.
-          return allLectures;
-        })
-        .asyncExpand((allLectures) {
-          // For each update from availableLecturesStream, merge with already-joined lectures.
-          return availableLecturesStream.map((availableSnapshot) {
-            final currentLectures = List<Lecture>.from(allLectures);
-            final joinedIdsInCurrentList = currentLectures.map((l) => l.id).toSet();
-
-            for (var doc in availableSnapshot.docs) {
-              if (!joinedIdsInCurrentList.contains(doc.id)) {
-                currentLectures.add(Lecture.fromFirestore(doc));
-              }
-            }
-            return currentLectures;
-          });
-        });
+  Stream<List<Lecture>> getStudentLecturesStream({required String userId}) async* {
+    while (true) {
+      yield await getStudentLecturesForDashboard(userId);
+      await Future<void>.delayed(const Duration(seconds: 20));
+    }
   }
 
   Future<Lecture> createLecture(Lecture lecture) async {

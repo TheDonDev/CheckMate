@@ -9,7 +9,6 @@ import 'package:checkmate/screens/welcome_screen.dart';
 import 'package:checkmate/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart' as fb_auth;
 
 class Wrapper extends StatelessWidget {
   const Wrapper({super.key});
@@ -55,30 +54,6 @@ class Wrapper extends StatelessWidget {
 
         // --- User is Logged In ---
         if (appUser != null) {
-          // Get the underlying Firebase Auth user object
-          final fbUser = fb_auth.FirebaseAuth.instance.currentUser;
-
-          // --- Sync Firestore Verification Status ---
-          // This is the crucial addition. Call the sync method from AuthService.
-          // We pass the fbUser to ensure we're syncing based on the latest auth state.
-          // Run this asynchronously; no need to await it here.
-          if (fbUser != null) {
-            authService.syncFirestoreVerificationStatus(authUser: fbUser);
-          }
-          // --- End Sync Call ---
-
-          // --- Check Email Verification for UI/UX ---
-          // Even though sync is happening, we might want to show a specific screen
-          // if the email isn't verified yet, prompting the user.
-          if (fbUser != null && !fbUser.emailVerified) {
-            print("Wrapper: User email not verified: ${fbUser.email}. Consider redirecting.");
-            // ** Redirect to a dedicated verification screen**
-            // return EmailVerificationScreen(email: fbUser.email!); 
-
-            // ** Show dashboard but maybe with a warning**
-            // (Proceeding with dashboard navigation for now as per original logic)
-          }
-
           // --- Navigate Based on User Role ---
           // Use the role from the custom appUser object (fetched from Firestore)
           switch (appUser.role) {
