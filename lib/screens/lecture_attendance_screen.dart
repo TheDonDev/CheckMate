@@ -7,7 +7,6 @@ import 'package:checkmate/models/lecture.dart';
 import 'package:checkmate/models/attendance_record.dart'; // Ensure this path is correct
 import 'package:checkmate/services/api_service.dart';
 import 'package:checkmate/widgets/document_name_widget.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for Timestamp comparison
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
@@ -85,14 +84,14 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
        final bool aCheckedIn = a.checkedIn;
        final bool bCheckedIn = b.checkedIn;
 
-       if (aCheckedIn && bCheckedIn) {
-         final Timestamp? aTime = a.checkInTime;
-         final Timestamp? bTime = b.checkInTime;
-         if (aTime != null && bTime != null) return aTime.compareTo(bTime); // Earliest check-in first
-         if (aTime == null && bTime != null) return 1; // Nulls last
-         if (aTime != null && bTime == null) return -1; // Nulls last
-         return 0; // Both null
-       }
+        if (aCheckedIn && bCheckedIn) {
+          final DateTime? aTime = a.checkInTime;
+          final DateTime? bTime = b.checkInTime;
+          if (aTime != null && bTime != null) return aTime.compareTo(bTime);
+          if (aTime == null && bTime != null) return 1;
+          if (aTime != null && bTime == null) return -1;
+          return 0;
+        }
        else if (aCheckedIn && !bCheckedIn) { return -1; } // Checked in before joined
        else if (!aCheckedIn && bCheckedIn) { return 1; } // Joined after checked in
        else { return a.joinedAt.compareTo(b.joinedAt); } // Both joined, sort by join time (earliest first)
@@ -125,9 +124,9 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
       final record = records[i];
       final String status = record.checkedIn ? 'Checked In' : 'Joined Only';
       // Use joinedAt as the timestamp if not checked in
-      final Timestamp? relevantTimestamp = record.checkedIn ? record.checkInTime : record.joinedAt;
+      final DateTime? relevantTimestamp = record.checkedIn ? record.checkInTime : record.joinedAt;
       final String formattedTime = relevantTimestamp != null
-          ? timeFormatter.format(relevantTimestamp.toDate().toLocal())
+          ? timeFormatter.format(relevantTimestamp.toLocal())
           : 'N/A';
       final String percentage = record.percentage ?? 'N/A';
 
@@ -507,12 +506,12 @@ class _LectureAttendanceScreenState extends State<LectureAttendanceScreen> {
 
                 if (isCheckedIn) {
                   final checkInTimestamp = record.checkInTime;
-                  if (checkInTimestamp != null) { timeString = dateTimeFormatter.format(checkInTimestamp.toDate().toLocal()); }
+                  if (checkInTimestamp != null) { timeString = dateTimeFormatter.format(checkInTimestamp.toLocal()); }
                   statusText = 'Checked In @ $timeString';
                   statusColor = Colors.green.shade700;
                   statusIcon = Icons.check_circle;
                 } else {
-                  timeString = dateTimeFormatter.format(record.joinedAt.toDate().toLocal());
+                  timeString = dateTimeFormatter.format(record.joinedAt.toLocal());
                   statusText = 'Joined @ $timeString';
                   statusColor = Colors.orange.shade800;
                   statusIcon = Icons.hourglass_top_rounded;

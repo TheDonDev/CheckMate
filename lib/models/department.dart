@@ -1,5 +1,5 @@
-
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/department.dart
+import 'package:flutter/foundation.dart';
 
 class Department {
   final String id;
@@ -8,19 +8,30 @@ class Department {
 
   Department({required this.id, required this.name, required this.schoolId});
 
-  factory Department.fromFirestore(DocumentSnapshot doc) {
-    Map data = doc.data() as Map<String, dynamic>;
+  Department copyWith({
+    String? id,
+    String? name,
+    String? schoolId,
+  }) {
     return Department(
-      id: doc.id,
-      name: data['name'] ?? '',
-      schoolId: data['schoolId'] ?? '',
+      id: id ?? this.id,
+      name: name ?? this.name,
+      schoolId: schoolId ?? this.schoolId,
     );
   }
 
-  Map<String, dynamic> toFirestore() {
-    return {
-      'name': name,
-      'schoolId': schoolId,
-    };
+  @override
+  String toString() => 'Department(id: $id, name: $name, schoolId: $schoolId)';
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Department &&
+      other.id == id &&
+      other.name == name &&
+      other.schoolId == schoolId;
   }
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ schoolId.hashCode;
 }

@@ -570,7 +570,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 18),
 
                   // Department Dropdown
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _selectedSchoolId == null ? null : _adminService.getDepartments(_selectedSchoolId!),
                     builder: (context, snapshot) {
                       if (_selectedSchoolId == null) { return _buildErrorDropdown('Department', 'Select school first', isDisabled: true); }
@@ -611,7 +611,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 18),
 
                   // Course Dropdown
-                  StreamBuilder<QuerySnapshot>(
+                  StreamBuilder<LocalQuerySnapshot>(
                     stream: _selectedDepartmentId == null ? null : _adminService.getCourses(_selectedDepartmentId!),
                     builder: (context, snapshot) {
                       if (_selectedDepartmentId == null) { return _buildErrorDropdown('Course', 'Select department first', isDisabled: true); }

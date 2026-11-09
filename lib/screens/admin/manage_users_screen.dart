@@ -52,7 +52,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
             ),
           ),
           Expanded(
-            child: StreamBuilder<List<app_user.User>>(
+            child: StreamBuilder<LocalQuerySnapshot>(
               stream: _adminService.getUsers(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -61,7 +61,11 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final users = snapshot.data ?? [];
+                final docs = snapshot.data?.docs ?? [];
+                final users = docs.map((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  return app_user.User.fromApiJson(data);
+                }).toList();
                 final filteredUsers = users.where((user) {
                   final query = _searchQuery.toLowerCase();
                   return user.name.toLowerCase().contains(query) ||

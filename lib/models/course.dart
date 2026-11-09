@@ -1,5 +1,5 @@
-
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/course.dart
+import 'package:flutter/foundation.dart';
 
 class Course {
   final String id;
@@ -8,19 +8,30 @@ class Course {
 
   Course({required this.id, required this.name, required this.departmentId});
 
-  factory Course.fromFirestore(DocumentSnapshot doc) {
-    Map data = doc.data() as Map<String, dynamic>;
+  Course copyWith({
+    String? id,
+    String? name,
+    String? departmentId,
+  }) {
     return Course(
-      id: doc.id,
-      name: data['name'] ?? '',
-      departmentId: data['departmentId'] ?? '',
+      id: id ?? this.id,
+      name: name ?? this.name,
+      departmentId: departmentId ?? this.departmentId,
     );
   }
 
-  Map<String, dynamic> toFirestore() {
-    return {
-      'name': name,
-      'departmentId': departmentId,
-    };
+  @override
+  String toString() => 'Course(id: $id, name: $name, departmentId: $departmentId)';
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Course &&
+      other.id == id &&
+      other.name == name &&
+      other.departmentId == departmentId;
   }
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ departmentId.hashCode;
 }

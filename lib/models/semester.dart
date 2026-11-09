@@ -1,5 +1,5 @@
-
-import 'package:cloud_firestore/cloud_firestore.dart';
+// lib/models/semester.dart
+import 'package:flutter/foundation.dart';
 
 class Semester {
   final String id;
@@ -7,17 +7,25 @@ class Semester {
 
   Semester({required this.id, required this.name});
 
-  factory Semester.fromFirestore(DocumentSnapshot doc) {
-    Map data = doc.data() as Map<String, dynamic>;
+  Semester copyWith({
+    String? id,
+    String? name,
+  }) {
     return Semester(
-      id: doc.id,
-      name: data['name'] ?? '',
+      id: id ?? this.id,
+      name: name ?? this.name,
     );
   }
 
-  Map<String, dynamic> toFirestore() {
-    return {
-      'name': name,
-    };
+  @override
+  String toString() => 'Semester(id: $id, name: $name)';
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Semester && other.id == id && other.name == name;
   }
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode;
 }
